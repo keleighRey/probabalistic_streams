@@ -1,11 +1,4 @@
----
-title: "Basin_map"
-author: "Keleigh Reynolds"
-date: "11/2/2022"
-output: html_document
----
-
-```{r setup, include=FALSE}
+## ----setup, include=FALSE------------------------------------------------------
 knitr::opts_chunk$set(echo = TRUE)
 
 
@@ -25,11 +18,9 @@ library(flextable)
 library(grid)
 library(tmap)
 library(viridis)
-```
 
-Read in the .shp file for the basins.
 
-```{r}
+## ------------------------------------------------------------------------------
 basin_path <- "L:/DOW/BWAM Share/SMAS/data/map_files"
 basin_path <- "L:/BWAM Share/SMAS/data/map_files" #for keleigh
 
@@ -44,11 +35,9 @@ basin_shp <- sp::spTransform(
   basin,
   sp::CRS("+proj=longlat +datum=WGS84 +no_defs")
 )
-```
 
-Get the state outline
 
-```{r}
+## ------------------------------------------------------------------------------
 states <- sf::st_as_sf(map("state",
                            plot = FALSE,
                            fill = TRUE))
@@ -73,11 +62,9 @@ bbox_new[4] <- bbox_new[4] + (0.2 * yrange) # ymax - top
 bbox_new <- bbox_new %>% # take the bounding box ...
   st_as_sfc() # ... and make it a sf polygon
 # checking SSL
-```
 
-Print the map
 
-```{r}
+## ------------------------------------------------------------------------------
 # basin_map <- tm_basemap(c(
 #   StreetMap = "OpenStreetMap",
 #   TopoMap = "OpenTopoMap"
@@ -105,10 +92,9 @@ Print the map
 #     align = "right"
 #   )
 # basin_map
-```
- Append data to plot-have to run the grab_data .RMD first, it will save the output in the outputs folder.
- 
-```{r}
+
+
+## ------------------------------------------------------------------------------
 
 # read in the analysis data
 sps_data <- read.csv("outputs/mean_subpop_basin_17_21_cycle.csv")
@@ -118,10 +104,9 @@ sps_data2<-sps_data %>% #take out housatonic and ramapo
   
 
 basin_map_append <- merge(basin_shp, sps_data2) # merge data by changing the subpopulation name
-```
 
 
-```{r}
+## ------------------------------------------------------------------------------
 
 # viridis magma, specify 0-10 range in the tm_fill; just do the last cycle for the analysis-look this up to see how we do trend analysis-just do last 5
 
@@ -154,19 +139,18 @@ basin_map2 <- tm_basemap(c(
     align = "right"
   )+tm_text("Basin__", size=0.5)
 basin_map2
-```
 
-```{r}
+
+## ------------------------------------------------------------------------------
 
 # read in the analysis data for first cycle
 # sps_data2 <- read.csv("outputs/mean_subpop_basin_2008_2012_cycle.csv")
 # sps_data2$Basin__ <- sps_data2$Subpopulation
 # 
 # basin_map_append2 <- merge(basin_shp, sps_data2) # merge data by changing the subpopulation name
-```
 
 
-```{r}
+## ------------------------------------------------------------------------------
 
 # viridis magma, specify 0-10 range in the tm_fill; just do the last cycle for the analysis-look this up to see how we do trend analysis-just do last 5
 
@@ -200,9 +184,9 @@ basin_map2
 #   )
 # 
 # basin_map_first
-```
 
-```{r create-tables-for-writeup}
+
+## ----create-tables-for-writeup-------------------------------------------------
 
 sps_data_short <- sps_data %>%
   dplyr::select(Subpopulation, Estimate, StdError,nResp) %>%
@@ -247,9 +231,5 @@ sps_data_short<-merge(sps_data_short,basins,
 
 tab <- table.f(sps_data_short, 2, ncol(sps_data_short))
 tab
-
-```
-
-
 
 

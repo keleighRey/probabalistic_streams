@@ -1,0 +1,48 @@
+---
+title: "305(b) Report"
+author: "Zachary M. Smith"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Streams Probabilistic Sampling : 2017-2021
+
+Probability based sampling was conducted by the Stream Monitoring and Assessment Section as part of the Rotating Integrated Basin Studies (RIBS) [monitoring cycle](https://www.dec.ny.gov/chemical/29576.html) during a 5 year period (2017 to 2021). Probabilty based sampling within basins allows for statewide and basin-wide objective analysis for the purpose of management and characterization. The survey design used the method introduced by Stevens and Olsen (2004), the Generalized Random Tessellation Stratified (GRTS) survey design. The GRTS sampling considered stream size in the 17 major river system watersheds or reporting basins. Benthic macroinvertebrates were collected once at each site and an associated BAP score was calculated according to the [biomonitoring SOP.](https://www.dec.ny.gov/docs/water_pdf/sop20821biomonitoring.pdf) BAP scores were used for basic condition estimates across the state.
+
+For more information about the collection and calculation of BAP scores refer to the [Bioassessment Fact Sheet.](https://www.dec.ny.gov/docs/water_pdf/bapnarrative18.pdf)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+#citation("spsurvey")
+```
+
+```{r load-packages, include=FALSE}
+library(spsurvey)
+```
+
+```{r source-scripts, include=FALSE,results='markup'}
+#knitr::purl(here::here("grab_data.Rmd"))
+#knitr::purl(here::here("map_maker.Rmd"))
+
+#source("grab_data.R", local = TRUE)
+source("map_maker.R", local = TRUE)
+```
+
+```{r print-table,include=TRUE,results='asis',echo=FALSE}
+tab<-fit_to_width(tab,max_width = 10)
+tab<-flextable::set_caption(tab,"Table 1: BAP estimates by Basin.")
+flextable::flextable_to_rmd(tab)
+```
+
+Estimates from the Ramapo River(15) were excluded from the analysis as not enough samples were collected for reliable interpretation. Basin analysis indicated that in New York State, Atlantic Ocean - Long Island Sound-17, Seneca-Oneida-Oswego Rivers -7, and the Mohawk River Basin-12, were the most impacted according to BAP scores (BAP =  3.98 ± 0.52, 3.93 ± 0.79, 4.71 ± 0.58, respectively). Conversely, several basins were well above the BAP impairment threshold (BAP =5). Lake Champlain - 10, Upper  Hudson-11, and the Delaware River-14 basins had the highest overal estimate for BAP scores (BAP =  8.00 ± 0.22, 7.82 ± 0.29, 7.78 ± 0.16, respectively). The map below presents the estimated basin analysis regionally by BAP category. Numeric labels indicate basin ID, as in the table above.
+
+```{r map, echo=FALSE, results='asis', message=FALSE,warning=FALSE,fig.cap="Figure 1. Map of estimated BAP score by basin. Color corresponds to BAP categories indicated in the plot legend."}
+
+print(basin_map2)
+```
+
+**References**
+
+D.L. Stevens, A.R. Olsen. Spatially balanced sampling of natural resources. J Am Stat Assoc, 99 (2004), pp. 262-278

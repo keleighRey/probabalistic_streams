@@ -1,16 +1,7 @@
----
-title: "spsurvey_stream_data"
-author: "Keleigh Reynolds"
-date: "11/2/2022"
-output: html_document
-params: 
-  user: kareynol
-  file: outputs/prob_site_adj_wgt_kar.csv
----
+params <-
+list(user = "kareynol", file = "outputs/prob_site_adj_wgt_kar.csv")
 
-install packages
-
-```{r}
+## -----------------------------------------------------------------------------------------------------
 #checkpoint::checkpoint("2022-11-17")
 # # install the most recent approved version from CRAN
 # install.packages("spsurvey")
@@ -26,15 +17,13 @@ library(dplyr)
 
 
 # test the branch and commit
-```
 
-grab data-sites list
-```{r read-site-list}
+
+## ----read-site-list-----------------------------------------------------------------------------------
 sites_list <- read.csv(here::here(params$file), stringsAsFactors = FALSE)
-```
 
-grad data-from the data base; we are going to grab the sites table, event table and the macroinvertebrate data
-```{r get-site-info}
+
+## ----get-site-info------------------------------------------------------------------------------------
 # read in sites and initialize sites list to include all sites
 # read in data that have the "master" tag
 db_path <- paste("C:/Users/", params$user, "/New York State Office of Information Technology Services/SMAS - Streams Data Modernization", sep = "")
@@ -76,11 +65,9 @@ site.ex.l <- unique(sites_list$SMAS_ID)
 # sites.short<-sites_raw_list$sites %>%
 #  subset(SITE_HISTORY_ID %in% site.ex.l) #subset based on the list
 # so we don't actually need this, we have basin andlat/long in the final file
-```
 
-Grab chemistry and pcode data (this will likely be used later in the analysis)
 
-```{r get-chemistry-and-pcode-data}
+## ----get-chemistry-and-pcode-data---------------------------------------------------------------------
 # chem_path <- file.path(
 #   db_path,
 #   "Cleaned Files",
@@ -134,12 +121,9 @@ Grab chemistry and pcode data (this will likely be used later in the analysis)
 #
 # #clean up\
 # rm(chem.all)
-```
 
 
-Get the field data, which includes the sample event table
-
-```{r get-event-table}
+## ----get-event-table----------------------------------------------------------------------------------
 field_path <- file.path(
   db_path,
   "Cleaned Files",
@@ -179,10 +163,9 @@ field_raw_list$insitu$pcode.num <- as.numeric(field_raw_list$insitu$ISWC_CHEM_PA
 
 # #merge pcode and insitu
 # field_raw_list$insitu<-merge(field_raw_list$insitu,chem_raw_list$pcode,by="pcode.num",all.x = TRUE)
-```
 
 
-```{r get-macro-data}
+## ----get-macro-data-----------------------------------------------------------------------------------
 # read in data that have the "master" tag
 db_path <- paste("C:/Users/", params$user, "/New York State Office of Information Technology Services/SMAS - Streams Data Modernization", sep = "")
 
@@ -232,9 +215,9 @@ bugs_raw <- merge(
   by.x = "MSDH_LINKED_ID_VALIDATOR",
   by.y = "MSSIH_LINKED_ID_VALIDATOR"
 )
-```
 
-```{r change-date-formats}
+
+## ----change-date-formats------------------------------------------------------------------------------
 # change date on the insitu data and bugs raw
 field_raw_list$insitu$ISWC_EVENT_SMAS_SAMPLE_DATE <- as.Date(field_raw_list$insitu$ISWC_EVENT_SMAS_SAMPLE_DATE, "%m/%d/%Y")
 metrics$MSSIH_EVENT_SMAS_SAMPLE_DATE <- as.Date(metrics$MSSIH_EVENT_SMAS_SAMPLE_DATE, "%m/%d/%Y")
@@ -246,10 +229,9 @@ field_raw_list$userp$UPFDH_EVENT_SMAS_SAMPLE_DATE <- as.Date(field_raw_list$user
 field_raw_list$habitat$HFDH_EVENT_SMAS_SAMPLE_DATE <- as.Date(field_raw_list$habitat$HFDH_EVENT_SMAS_SAMPLE_DATE, "%m/%d/%Y")
 library(lubridate)
 field_raw_list$insitu$year <- as.character(year(field_raw_list$insitu$ISWC_EVENT_SMAS_SAMPLE_DATE))
-```
 
 
-```{r subset-data-to-sites-list}
+## ----subset-data-to-sites-list------------------------------------------------------------------------
 sites.l <- unique(sites_list$SMAS_ID)
 
 # get the sites first and then merge with the raw bugs and metrics by the validator.
@@ -281,11 +263,9 @@ userp.df <- field_raw_list$userp %>%
 
 sample_info.df <- field_raw_list$sample_info %>%
   subset(SEIH_EVENT_SMAS_HISTORY_ID %in% sites.l)
-```
 
-Subset to Dates function-we have the list of sites/dates. One question-do we do an average of BAP at a site (if it's been visited a couple times?) or do we do JUST the BAP found at the sampling date?
 
-```{r}
+## -----------------------------------------------------------------------------------------------------
 
 sites_list$filter_match <- paste(sites_list$SMAS_ID,
   sites_list$YEAR,
@@ -336,14 +316,9 @@ unmatched_sample_info <- merge(unmatched, field_raw_list$sample_info,
 #          SEIH_BIOSAMPLE_COLLECT,SEIH_BIOSAMPLE_TYPE) %>%
 #   filter(SEIH_BIOSAMPLE_COLLECT==TRUE)
 # double checked the 2021-these are low gradient samples; not sure about the rest of them
-```
 
-RUN THE SPSURVEY!!
-So it looks like these files need to have a projection assigned and be an sf object?
 
-We also need to assign the weight back to the COMID or the EPA ID to get that for the analysis to run.
-
-```{r run-spsurvey package}
+## ----run-spsurvey package-----------------------------------------------------------------------------
 # open the template data
 # load(file='data/NE_Lakes.rda')
 
@@ -386,9 +361,9 @@ write.csv(cont_ests$Mean, "outputs/mean_subpop_basin_17_21_cycle.csv")
 
 spsurvey::sp_summary(metrics.sf, formula = MMDH_BIO_ASMT_PROFILE_SCORE ~ BASIN)
 spsurvey::sp_plot(metrics.sf, formula = MMDH_BIO_ASMT_PROFILE_SCORE ~ BASIN)
-```
 
-```{r trend-data}
+
+## ----trend-data---------------------------------------------------------------------------------------
 #as of 11/22/22 this is not working, but will be fun to try
 
 # metrics_all.sf <- sf::st_as_sf(metrics_joined,
@@ -416,8 +391,4 @@ spsurvey::sp_plot(metrics.sf, formula = MMDH_BIO_ASMT_PROFILE_SCORE ~ BASIN)
 # )
 # 
 # ex <- spsurvey::NRSA_EPA7
-```
-
-
-
 
