@@ -1,0 +1,28 @@
+---
+title: "stashed_methods"
+author: "Keleigh Reynolds"
+date: "11/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The spsurvey package (Dumelle et. al, 2022) was utilized for analysis of BAP scores and adjusting weight calculations for each site. Weight calculations were computed using the unequal probability grouping (Strahler order), and readjusted after sampling was complete. These weights were then used to properly estimate the BAP distribution across the state or by sub-population (basin). Continuous variable analysis using the "cont_analysis" function of the spsurvey package was utilized for sub-population analysis at the basin scale, returned as cumulative ditribution functions (CDF's). The function returns estimated mean, standard error, and confidence intervals. The table below presents the estimated mean BAP by basin including the standard error.
+
+The analysis above was conducted using R 4.x with the packages spsurvey 5.x and tidyverse 1.x. R itself and all packages used are available from CRAN.
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

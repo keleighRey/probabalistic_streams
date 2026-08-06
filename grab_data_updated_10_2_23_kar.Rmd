@@ -37,8 +37,7 @@ sites_list <- read.csv(here::here(params$file), stringsAsFactors = FALSE)
 Grab chemistry and pcode data (this will likely be used later in the analysis)
 
 ```{r get-chemistry-and-pcode-data}
-chem<-fetch::fetch_chem(path = "L:/BWAM Share/data/streams/cleaned_files",
-                        output = "standard")
+chem<-fetch::fetch_chem(output = "standard")
 chem$V1.x<-NULL
 chem$X.y<-NULL
 chem$V1<-NULL
@@ -46,14 +45,13 @@ chem$V1.y<-NULL
 chem$X.x<-NULL
 chem$V1.x<-NULL
 
-chem<-chem %>% 
+chem<-chem %>%
   distinct()
 
 field<-fetch::fetch_field(path = "L:/BWAM Share/data/streams/cleaned_files",
                         output = "standard")
 
-bugs<-fetch::fetch_bugs(path = "L:/BWAM Share/data/streams/cleaned_files",
-                        output = "standard")
+metrics<-fetch::fetch_bugs(path = "C:/Users/kareynol/OneDrive - New York State Office of Information Technology Services/Streams Data Modernization/Cleaned Files",output = "standard")
 
 ```
 
@@ -67,7 +65,7 @@ sites.l<-unique(sites_list$SMAS_ID)
 
 ```{r subset-chem}
 
-chem2<-chem %>% 
+chem2<-chem %>%
   subset(CHS_EVENT_SMAS_HISTORY_ID %in% sites.l)
 
 ```
@@ -81,16 +79,16 @@ sites_list$filter_match <- paste(sites_list$SMAS_ID,
   sep = "_"
 )
 
-chem3<-chem2 %>% 
-  filter(CHR_VALIDATOR_QUAL != "R") %>% 
+chem3<-chem2 %>%
+  filter(CHR_VALIDATOR_QUAL != "R") %>%
   mutate(date=as.Date(CHS_EVENT_SMAS_SAMPLE_DATE,"%m/%d/%Y"),
          year=format(date,"%Y"),
          filter_match=paste(CHS_EVENT_SMAS_HISTORY_ID,
                             year,
-                            sep = "_")) %>% 
+                            sep = "_")) %>%
   mutate(CHR_RESULT_VALUE = case_when(CHR_VALIDATOR_QUAL %in% "U"~0.5*CHR_METHOD_DETECT_LIMIT,
                                       TRUE~CHR_RESULT_VALUE)) %>% #getting 1/2 the MDL for analysis
-  group_by(filter_match,CHEM_PARAMETER_NAME,CHEM_PARAMETER_UNIT_NOSP,CHEM_PARAMETER_FRACTION) %>% 
+  group_by(filter_match,CHEM_PARAMETER_NAME,CHEM_PARAMETER_UNIT_NOSP,CHEM_PARAMETER_FRACTION) %>%
   summarise(median=median(CHR_RESULT_VALUE,na.rm = TRUE))
 
 chem_joined <- merge(sites_list,
@@ -101,13 +99,13 @@ chem_joined <- merge(sites_list,
 #same thing for the insitu
 insitu.df<-field$insitu
 
-insitu2<-insitu.df %>% 
+insitu2<-insitu.df %>%
   mutate(date=as.Date(ISWC_EVENT_SMAS_SAMPLE_DATE,"%m/%d/%Y"),
          year=format(date,"%Y"),
          filter_match=paste(ISWC_EVENT_SMAS_HISTORY_ID,
                             year,
-                            sep = "_")) %>% 
-  group_by(filter_match,ISWC_CHEM_PARAMETER_NAME) %>% 
+                            sep = "_")) %>%
+  group_by(filter_match,ISWC_CHEM_PARAMETER_NAME) %>%
   summarise(median=median(ISWC_RESULT,na.rm = TRUE))
 
 insitu_joined <- merge(sites_list,
@@ -115,7 +113,7 @@ insitu_joined <- merge(sites_list,
   by = "filter_match"
 )
 
-metrics.df<-bugs
+metrics.df<-metrics
 
 metrics.final <- metrics.df %>%
   mutate(
@@ -137,17 +135,17 @@ unmatched <- anti_join(sites_list,
 )
 # join with sample info to see why they didn't match
 # create the match id first
-field_raw_list$sample_info <- field_raw_list$sample_info %>% mutate(
-  YEAR = format(SEIH_EVENT_SMAS_SAMPLE_DATE, "%Y"),
-  filter_match = paste(SEIH_EVENT_SMAS_HISTORY_ID,
-    YEAR,
-    sep = "_"
-  )
-)
+# field_raw_list$sample_info <- field_raw_list$sample_info %>% mutate(
+#   YEAR = format(SEIH_EVENT_SMAS_SAMPLE_DATE, "%Y"),
+#   filter_match = paste(SEIH_EVENT_SMAS_HISTORY_ID,
+#     YEAR,
+#     sep = "_"
+#   )
+# )
 
-unmatched_sample_info <- merge(unmatched, field_raw_list$sample_info,
-  by = "filter_match"
-)
+# unmatched_sample_info <- merge(unmatched, field_raw_list$sample_info,
+#   by = "filter_match"
+# )
 # unmatched_sample_info<-unmatched_sample_info %>%
 #   select(SMAS_ID,YEAR.x,COMID,SEIH_EVENT_SMAS_SAMPLE_DATE,SEIH_SITE_TYPE_PROBABILISTC,
 #          SEIH_BIOSAMPLE_COLLECT,SEIH_BIOSAMPLE_TYPE) %>%
@@ -171,41 +169,38 @@ metrics_joined <- metrics_joined %>%
 metrics_joined$BASIN <- as.numeric(substr(metrics_joined$SMAS_ID, start = 1, stop = 2))
 
 
-metrics_joined_last_cycle <- metrics_joined %>%
-  filter(YEAR >= 2018 & YEAR <= 2022)
-
-chem_joined_last_cycle <- chem_joined %>%
-  filter(YEAR >= 2018 & YEAR <= 2022)
-chem_joined_last_cycle <- chem_joined_last_cycle %>%
-  dplyr::rename(latitude = LAT, longitude = LONG)
-# get basin in there
-chem_joined_last_cycle$BASIN <- as.numeric(substr(chem_joined_last_cycle$SMAS_ID, start = 1, stop = 2))
+# metrics_joined_last_cycle <- metrics_joined %>%
+#   filter(YEAR >= 2018 & YEAR <= 2022)
+# 
+# chem_joined_last_cycle <- chem_joined %>%
+#   filter(YEAR >= 2018 & YEAR <= 2022)
+# chem_joined_last_cycle <- chem_joined_last_cycle %>%
+#   dplyr::rename(latitude = LAT, longitude = LONG)
+# # get basin in there
+# chem_joined_last_cycle$BASIN <- as.numeric(substr(chem_joined_last_cycle$SMAS_ID, start = 1, stop = 2))
 
 #write.csv(chem_joined_last_cycle,"outputs/chem_joined_18_22.csv")
 
 #same for the in-situ **as of 10/2/2023 the 2022 insitu is not available so still reaching back to the 2017 year for those basins
-insitu_joined_last_cycle <- insitu_joined %>%
-  filter(YEAR >= 2017 & YEAR <= 2021)
-
-chem_joined_last_cycle <- chem_joined_last_cycle %>%
-  dplyr::rename(latitude = LAT, longitude = LONG)
-# get basin in there
-chem_joined_last_cycle$BASIN <- as.numeric(substr(chem_joined_last_cycle$SMAS_ID, start = 1, stop = 2))
-
-insitu_joined_last_cycle<-insitu_joined_last_cycle %>% 
-  mutate(BASIN=as.numeric(substr(SMAS_ID, start = 1, stop = 2)))
-insitu_joined_last_cycle <- insitu_joined_last_cycle %>%
-  dplyr::rename(latitude = LAT, longitude = LONG)
+# insitu_joined_last_cycle <- insitu_joined %>%
+#   filter(YEAR >= 2017 & YEAR <= 2021)
+# 
+# chem_joined_last_cycle <- chem_joined_last_cycle %>%
+#   dplyr::rename(latitude = LAT, longitude = LONG)
+# # get basin in there
+# chem_joined_last_cycle$BASIN <- as.numeric(substr(chem_joined_last_cycle$SMAS_ID, start = 1, stop = 2))
+# 
+# insitu_joined_last_cycle<-insitu_joined_last_cycle %>% 
+#   mutate(BASIN=as.numeric(substr(SMAS_ID, start = 1, stop = 2)))
+# insitu_joined_last_cycle <- insitu_joined_last_cycle %>%
+#   dplyr::rename(latitude = LAT, longitude = LONG)
 #write.csv(insitu_joined_last_cycle,"outputs/insitu_joined_17_21.csv")
 
 
-chem.sf <- sf::st_as_sf(chem_joined_last_cycle,
-  coords = c("longitude", "latitude"),
-  crs = "+proj=longlat +datum=WGS84 +no_defs"
-)
+#metrics_joined<-metrics_joined %>% 
+  
 
-
-metrics.sf <- sf::st_as_sf(metrics_joined_last_cycle,
+metrics.sf <- sf::st_as_sf(metrics_joined,
   coords = c("longitude", "latitude"),
   crs = "+proj=longlat +datum=WGS84 +no_defs"
 )
@@ -273,6 +268,75 @@ cont_ests <- spsurvey::cont_analysis(chem.sf,
 # 
 # ex <- spsurvey::NRSA_EPA7
 ```
+
+```{r state-wide-conditions, fig.width=10}
+chloride<-chem.sf %>% 
+  filter(CHEM_PARAMETER_NAME == "CHLORIDE")
+
+chloride<-chloride %>% 
+  mutate(chloride_cat = case_when(median > 100 ~ "Impacted",
+                                  median >70 & median < 100~"Med-impacted",
+                                  median >50 & median < 70~"Non-impacted",
+                                  median <50 ~ "Pristine",
+                                  TRUE~"error"))
+chloride_ests<-spsurvey::cat_analysis(
+  dframe = chloride,
+  vars = "chloride_cat",
+  siteID = "SMAS_ID",
+  weight = "adj_wgt"
+)
+
+
+
+ggplot2::ggplot(chloride_ests, aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=chloride_ests$Category)) +
+  geom_crossbar( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= chloride_ests$LCB95Pct.P, 
+                    ymax= chloride_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()
+
+
+
+```
+
+```{r state-wide-conditions, fig.width=10}
+do<-insitu.sf %>% 
+  filter(ISWC_CHEM_PARAMETER_NAME == "DISSOLVED_OXYGEN")
+
+do<-do %>% 
+  mutate(standard_cat = case_when(median > 8.5 ~ "Supporting",
+                                  median >6 & median < 8~"Mildly close",
+                                  median < 6~"Not Supporting",
+                                  TRUE~"error")) %>% 
+  filter(adj_wgt >0)
+standard_ests<-spsurvey::cat_analysis(
+  dframe = do,
+  vars = "standard_cat",
+  siteID = "SMAS_ID",
+  weight = "adj_wgt"
+)
+
+
+
+ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Category), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Category)) +
+  geom_crossbar( aes(x=factor(standard_ests$Category), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P, 
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "Dissolved Oxygen (mg/L)")
+
+
+
+```
+
 
 
 

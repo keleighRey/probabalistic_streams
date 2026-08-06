@@ -28,7 +28,7 @@ library(tidyverse)
 ```{r read-in-files, warning=FALSE,message=FALSE}
 insitu<-read.csv(here::here("outputs/insitu_joined_17_21.csv"))
 
-chem<-read.csv(here::here("outputs/chem_joined_17_21.csv"))
+chem<-read.csv(here::here("outputs/chem_joined_18_22.csv"))
 
 ```
 

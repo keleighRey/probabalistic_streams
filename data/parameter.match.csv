@@ -1,0 +1,40 @@
+parameter,fraction,CHARACTERISTIC_NAME,Description
+aluminum,dissolved,"Aluminum, Dissolved",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+ammonia,total,"Ammonia, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+arsenic,total,"Arsenic, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+arsenic,dissolved,"Arsenic, Dissolved",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+cadmium,dissolved,"Cadmium, Dissolved",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+cadmium,total,"Cadmium, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+chloride,total,"Chloride, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+copper,dissolved,"Copper, Dissolved",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+copper,total,"Copper, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+fluoride,total,"Fluoride, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+iron,total,"Iron, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+lead,dissolved,"Lead, Dissolved",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+lead,total,"Lead, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+magnesium,total,"Magnesium, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+manganese,total,"Manganese, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+mercury,dissolved,"Mercury, Dissolved",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+mercury,total,"Mercury, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+nickel,dissolved,"Nickel, Dissolved",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+nickel,total,"Nickel, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+nitrate,total,"Nitrate, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+nitrate_nitrite,total,"Nitrate_Nitrite, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+nitrite,total,"Nitrite, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+phosphorus,total,"Phosphorus, Total",This parameter is used in conjuction with BAP scores for numeric nutrient guidance values for:
+silver,total,"Silver, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+sulfate,total,"Sulfate, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+zinc,dissolved,"Zinc, Total",This parameter is compared to the water quality standard to assess the use of this river/stream for:
+dissolved_oxygen,dissolved,Dissolved Oxygen,This parameter is compared to the water quality standard to assess the use of this river/stream for:
+ph,total,PH,This parameter is compared to the water quality standard to assess the use of this river/stream for:
+total_kjehldal_nitrogen,total,tkn,
+specific_conductance,,,
+nitrogen,total,,This parameter is compared to the water quality standard to assess the use of this river/stream for:
+habitat_model_affinity_score,,,
+calcium,total,,
+hardness,,,
+alkalinity,,,
+dissolved_organic_carbon,,,
+temperature,,,
+conductivity,,,
+total_dissolved_solids,,,

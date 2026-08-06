@@ -1,0 +1,1206 @@
+---
+title: "Probabilistic_statewide_draft"
+format: html
+editor: visual
+---
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+```{r message=FALSE,echo=FALSE}
+library(ggplot2)
+library(dplyr)
+
+#plotting function
+
+plot_standard_ests<-function(df,title,ylab,xlab){
+  
+  plot<-ggplot2::ggplot(df, aes(x=factor(df$Subpopulation), y=df$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=df$Subpopulation)) +
+  geom_crossbar( aes(x=factor(df$Subpopulation), y=df$Estimate.P, ymin=df$LCB95Pct.P, ymax=df$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= df$LCB95Pct.P,
+                    ymax= df$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = title)+
+  theme(legend.position = "none")
+
+plot+facet_wrap(~Category) + ylab(ylab)+xlab(xlab)
+
+}
+
+```
+
+```{r read in the data}
+
+stream_df<-readRDS("outputs/Probabilistic_data_workup_2_6_25.rds")
+
+#add the adjusted weight for ALL surveys (adj_weight/3 surveys)
+
+stream_df<-stream_df |> 
+  mutate(adj_wgt_all_surveys = adj_wgt/3)
+
+stream_df<-stream_df %>% 
+  dplyr::rename(latitude = LATITUDE,
+         longitude = LONGITUDE)
+
+#make a list of the available parameters
+params<-stream_df|> 
+  select(PARAMETER_NAME,UNIT) |> 
+  unique()
+```
+
+## Condition estimates
+
+```{r bap stuff, warning=FALSE}
+
+#filter the data
+metrics.sf<-stream_df %>% 
+  filter(PARAMETER_NAME %in% "bap_biological_assessment_profile") %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 7.5 ~ "Non-Impacted",
+                                  RESULT_VALUE >=5 & RESULT_VALUE < 7.5~"Slightly Impacted",
+                                  RESULT_VALUE < 5& RESULT_VALUE >=2.5~"Moderately Impacted",
+                                  RESULT_VALUE <2.5~"Severly Impacted",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt_all_surveys >0)
+
+#create sf object
+metrics.sf <- sf::st_as_sf(metrics.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = metrics.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt_all_surveys"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot_standard_ests(standard_ests,"BAP Categories", ylab = "BAP Scores",xlab = "Stream Miles")
+
+df<-standard_ests
+
+df<-df |> 
+  mutate(Category = ordered(Category, levels = c("Non-Impacted","Slightly Impacted",
+                                                 "Moderately Impacted","Severly Impacted"))) |> 
+  group_by(Category) |> 
+  mutate(Estimate.P_clean = round(Estimate.P, digits = 0))
+  
+plot_bap<-ggplot2::ggplot(df, aes(x=df$Category, y=df$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=df$Category),alpha = 0.5) +
+  geom_crossbar( aes(x=factor(df$Category), y=df$Estimate.P, ymin=df$LCB95Pct.P, ymax=df$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_text(aes(label = paste(Estimate.P_clean,"%",sep = ""), vjust = -0.1))+
+  geom_errorbar(aes(ymin= df$LCB95Pct.P,
+                    ymax= df$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.05)+
+  coord_flip()+ggtitle(label = "BAP Categories")+
+  theme(legend.position = "none")+
+  scale_x_discrete(limits = rev)+
+  labs(y = "Estimated % of Stream Miles in NYS",
+       x = "Categories")+
+  theme_minimal()+
+  theme(legend.position="none")
+  
+
+plot_bap
+
+
+```
+
+```{r habitat conditionm, warning=FALSE,message=FALSE}
+
+#filter the data
+# hma.sf<-stream_df%>% 
+#   filter(PARAMETER_NAME %in% c("habitat_assessment_score")) %>%
+#   group_by(SITE_CODE, EVENT_DATETIME) %>% 
+#   mutate(standard_cat = case_when(RESULT_VALUE >= 80 ~ "Natural",
+#                                     RESULT_VALUE >= 70 & RESULT_VALUE <= 80  ~ "Altered",
+#                                     RESULT_VALUE >= 60 & RESULT_VALUE <= 69~ "Moderate",
+#                                     RESULT_VALUE < 60 ~ "Severe",
+#                                     TRUE ~ "ERROR")) %>% 
+#   filter(adj_wgt > 0)
+#adjusted this category to match BAP
+
+
+#filter the data
+hma.sf<-stream_df%>% 
+  filter(PARAMETER_NAME %in% c("habitat_assessment_score")) %>%
+  group_by(SITE_CODE, EVENT_DATETIME) %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 80 ~ "Non-Impacted",
+                                    RESULT_VALUE >= 70 & RESULT_VALUE <= 80  ~ "Slightly Impacted",
+                                    RESULT_VALUE >= 60 & RESULT_VALUE <= 69~ "Moderately Impacted",
+                                    RESULT_VALUE < 60 ~ "Severly Impacted",
+                                    TRUE ~ "ERROR")) %>% 
+  filter(adj_wgt > 0)
+
+
+#create sf object
+hma.sf <- sf::st_as_sf(hma.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests_habitat<-spsurvey::cat_analysis(
+  dframe = hma.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt_all_surveys"
+  #subpops = "draw_year"
+)
+
+standard_ests_habitat<-standard_ests_habitat %>% 
+  filter(Category != "Total")
+df_hma<-standard_ests_habitat
+
+# df<-df |> 
+#   mutate(Category = ordered(Category, levels = c("Natural","Altered", "Moderate","Severe")))
+
+
+df_hma<-df_hma |> 
+  group_by(Category) |> 
+  mutate(Category = ordered(Category, levels = c("Non-Impacted","Slightly Impacted",
+                                                 "Moderately Impacted","Severly Impacted")),
+         Estimate.P_clean = round(Estimate.P,digits = 0))
+  
+
+  
+
+
+plot_hma<-ggplot2::ggplot(df_hma, aes(x=Category, y=Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=Category),alpha = 0.5) +
+  geom_crossbar( aes(x=factor(Category), y=Estimate.P, ymin=LCB95Pct.P, ymax=UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= LCB95Pct.P,
+                    ymax= UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.05)+
+  coord_flip()+ggtitle(label = "HMA Categories")+
+  geom_text(aes(label = paste(Estimate.P_clean,"%",sep = ""), vjust = -0.1))+
+  scale_x_discrete(limits = rev)+
+  labs(y = "Estimated % of Stream Miles in NYS",
+       x = "Categories")+
+  theme_minimal()+
+  theme(legend.position="none")
+plot_hma
+
+pie(standard_ests_habitat$Estimate.P)
+
+```
+
+```{r bap and hma together}
+
+library(patchwork)
+
+plot_bap + plot_hma +plot_layout(nrow = 1,ncol = 2,axis_titles = "collect",guides = "collect",axes = "collect")
+
+```
+
+## Statewide pollutant loads
+
+we're going to to the big ones BAP TP, TKN, chloride,ammonia etc. big ones
+
+```{r workup spl, message=FALSE, warning=FALSE}
+
+#filter these to > 2017 since we'll just run one set
+spl<-stream_df |> 
+  filter(PARAMETER_NAME %in% c("phosphorus",
+                               "kjeldahl_nitrogen",
+                               "chloride",
+                               "ammonia",
+                               "bap_biological_assessment_profile",
+                               "nitrogen",
+                               "nitrite",
+                               "nitrate",
+                               "habitat_model_affinity_score",
+                               "dissolved_oxygen",
+                               "specific_conductance",
+                               "ph",
+                               "primary_contact_recreation", 
+                               "iron",
+                               "nitrite",
+                               "total_dissolved_solids")) |> 
+  filter(adj_wgt_all_surveys>0) |> 
+  filter(EVENT_DATETIME > "2017-01-01 00:00:00 EDT") |> 
+   mutate(UNIT = stringr::str_replace(UNIT,"/","_")) |> 
+   mutate(UNIT = stringr::str_replace(UNIT,"-","_")) |> 
+  mutate(RESULT_VALUE = case_when(RESULT_QUALIFIER %in% "U"~ 0,
+                                  TRUE~RESULT_VALUE)) |> #non-detects to 1/2 of the MDL
+  mutate(parameter_full = paste(PARAMETER_NAME,UNIT,sep = "_")) |> 
+  mutate(parameter_full = as.character(parameter_full)) |> 
+  select(c(SITE_CODE,EVENT_DATETIME,NUTRIENT_ECOREGION,parameter_full,RESULT_VALUE,WIPWL,BASIN_NAME,latitude,longitude,mdcaty,SO,wgt,adj_wgt_all_surveys,adj_wgt)) |> 
+  distinct() |> 
+  group_by(SITE_CODE,EVENT_DATETIME) |> 
+  # tidyr::pivot_wider(names_from = parameter_full,
+  #                    values_from = RESULT_VALUE,
+  #                    values_fn = function(x) median(x,na.rm = TRUE)) |> 
+  distinct()
+
+#create sf object
+spl <- sf::st_as_sf(spl,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+
+#create function to do this
+cont_ests_parameter<-function(df,parameter){
+  df2<-df |> 
+    filter(parameter_full %in% parameter) |> 
+    dplyr::rename(!!parameter := RESULT_VALUE)
+  
+spsurvey::cont_analysis(
+    dframe = df2,
+    siteID = "SITE_CODE",
+    vars = parameter,
+    weight = "adj_wgt"
+  )
+}
+
+#run these all
+
+cont_ests_phos<-cont_ests_parameter(df = spl,
+                    parameter = "phosphorus_mg_L")
+
+cont_ests_tkn<-cont_ests_parameter(df = spl,
+                    parameter = "kjeldahl_nitrogen_ug_L")
+
+cont_ests_chl<-cont_ests_parameter(df = spl,
+                    parameter = "chloride_ug_L")
+
+cont_ests_nh4<-cont_ests_parameter(df = spl,
+                    parameter = "ammonia_ug_L")
+
+cont_ests_TN<-cont_ests_parameter(df = spl,
+                    parameter = "nitrogen_ug_L")
+
+cont_ests_nitrate<-cont_ests_parameter(df = spl,
+                    parameter = "nitrate_ug_L")
+
+cont_ests_nitrite<-cont_ests_parameter(df = spl,
+                    parameter = "nitrite_ug_L")
+
+cont_ests_DO<-cont_ests_parameter(df = spl,
+                    parameter = "dissolved_oxygen_mg_L")
+
+spl<-spl |> 
+  mutate(parameter_full = case_when(
+    parameter_full %in% "ph_pH units" ~ "ph",
+    TRUE ~ parameter_full
+  ))
+
+cont_ests_ph<-cont_ests_parameter(df = spl,
+                    parameter = "ph" )
+
+cont_ests_iron<-cont_ests_parameter(df = spl,
+                    parameter = "iron_ug_L")
+# 
+#not sure why this isnt working
+
+```
+
+## CDF curves
+
+plot them - cdf curves
+
+```{r plots - spl}
+plot(cont_ests_phos$CDF)
+plot(cont_ests_tkn$CDF)
+plot(cont_ests_chl$CDF)
+plot(cont_ests_nh4$CDF)
+plot(cont_ests_TN$CDF)
+plot(cont_ests_nitrate$CDF)
+plot(cont_ests_nitrite$CDF)
+plot(cont_ests_ph$CDF)
+plot(cont_ests_DO$CDF)
+plot(cont_ests_iron$CDF)
+
+options(scipen = 9999)
+
+ph_plot<-spsurvey::cdf_plot(cont_ests_ph$CDF,
+                   xlab = "ph",
+                   ylab = "Percent of Stream Length",
+                   main = "Estimates")
+
+ph<-ggplot(cont_ests_ph$CDF, aes(x = Value, y = Estimate.P)) +
+  geom_line(color = "grey")+
+  geom_ribbon(aes(ymin = LCB95Pct.P,ymax = UCB95Pct.P ), fill = "blue", alpha = 0.2)+
+labs(title = "Cumulative Probability of Parameter Values (CDF plots)",
+x = "pH", y = "% of Stream Miles")+
+  theme_minimal()
+ph
+
+do_plot<-ggplot(cont_ests_DO$CDF, aes(x = Value, y = Estimate.P)) +
+  geom_line(color = "grey")+
+  geom_ribbon(aes(ymin = LCB95Pct.P,ymax = UCB95Pct.P ), fill = "blue", alpha = 0.2)+
+labs(title = "",
+x = "Dissolved Oxygen (mg/L)", y = "% of Stream Miles")+
+  theme_minimal()
+do_plot
+
+iron_plot<-ggplot(cont_ests_iron$CDF, aes(x = Value, y = Estimate.P)) +
+  geom_line(color = "grey")+
+  geom_ribbon(aes(ymin = LCB95Pct.P,ymax = UCB95Pct.P ), fill = "blue", alpha = 0.2)+
+labs(title = "",
+x = "Iron (ug/L)", y = "% of Stream Miles")+
+  theme_minimal()
+iron_plot
+
+
+library(patchwork)
+ph + do_plot + iron_plot +plot_layout(nrow = 1,ncol = 3,axis_titles = "collect",guides = "collect",axes = "collect")
+
+
+```
+
+## Bars with cdf estimates?
+
+```{r plot bar of cdf estimates}
+
+mean_do_plot<-ggplot(cont_ests_DO$Mean, aes(x = Indicator, y = Estimate)) +
+    geom_bar(stat="identity",aes(fill=Indicator)) +
+  geom_crossbar( aes(x=Indicator, y=Estimate,
+                     ymin=LCB95Pct,
+                     ymax=UCB95Pct),
+                 colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= LCB95Pct,
+                    ymax= UCB95Pct),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "WQS")+
+  theme(legend.position = "none")+
+  scale_x_discrete(limits = rev)+
+  labs(y = "Estimated Values in NYS (ug/L)",
+       x = "")+
+  theme_minimal()
+mean_do_plot
+
+```
+
+```{r}
+
+
+
+NOX_ests<-rbind(cont_ests_TN$Mean,
+                cont_ests_tkn$Mean,
+                cont_ests_nh4$Mean,
+                cont_ests_nitrate$Mean,
+                cont_ests_nitrite$Mean)
+
+
+nox_plot<-ggplot(NOX_ests,aes(x = Indicator,y = Estimate))+
+    geom_bar(stat="identity",aes(fill=NOX_ests$Indicator)) +
+  geom_crossbar( aes(x=NOX_ests$Indicator, y=NOX_ests$Estimate,
+                     ymin=NOX_ests$LCB95Pct,
+                     ymax=NOX_ests$UCB95Pct),
+                 colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= NOX_ests$LCB95Pct,
+                    ymax= NOX_ests$UCB95Pct),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "NOX Categories")+
+  theme(legend.position = "none")+
+  scale_x_discrete(limits = rev)+
+  labs(y = "Estimated Values in NYS (ug/L)",
+       x = "NOX Categories ")+
+  theme_minimal()
+
+nox_plot
+  
+
+```
+
+```{r categories for spl}
+
+spl_categories<-spl |>
+  tidyr::pivot_wider(names_from = parameter_full,
+                     values_from = RESULT_VALUE,
+                     values_fn = function(x) median(x,na.rm = TRUE)) |> 
+  dplyr::mutate(phos_cat = case_when((
+    `phosphorus_mg_L` > 0.075) & 
+      (NUTRIENT_ECOREGION %in% c("7","14"))&
+      (`bap_biological_assessment_profile_score_0_10`< 5) ~ "impacted",
+    (`phosphorus_mg_L` > 0.030) & 
+      (NUTRIENT_ECOREGION %in% c("8","11"))&
+      (`bap_biological_assessment_profile_score_0_10`< 5) ~ "impacted",
+    is.na(`phosphorus_mg_L`)~ "no_sample",
+    TRUE~ "non-impacted")) |> 
+  mutate(chl_cat = case_when(
+    `chloride_ug_L` > 250000 ~ "impacted",
+    is.na(`chloride_ug_L`)~ "no_sample",
+    TRUE ~ "non-impacted")) |> 
+  # mutate(amm_cat = case_when(
+  #   `ammonia_ug_L` > 2000 ~ "impacted", #this may hae to be changed
+  #   is.na(`ammonia_ug_L` )~"no_sample",
+  #   TRUE ~ "non-impacted")) |> 
+    mutate(amm_cat = case_when(
+    `ammonia_ug_L` > 1000 ~ "impacted", #this may hae to be changed
+    is.na(`ammonia_ug_L` )~"no_sample",
+    TRUE ~ "non-impacted")) |> 
+  mutate(tkn_cat = case_when(
+    `kjeldahl_nitrogen_ug_L` > 2500 ~ "impacted",
+    is.na(`kjeldahl_nitrogen_ug_L`)~ "no_sample",
+    TRUE ~ "non-impacted")) |> #used AJ's paper
+  mutate(bap_cat = case_when(
+    `bap_biological_assessment_profile_score_0_10` >=5 ~ "non-impacted",
+    `bap_biological_assessment_profile_score_0_10` %in% "" ~ "no_sample",
+    is.na(`bap_biological_assessment_profile_score_0_10`)~"no_sample",
+    TRUE~"impacted")) |> 
+  mutate(nitrogen_cat = case_when(
+    `nitrogen_ug_L` > 483 ~"impacted",
+    `nitrogen_ug_L` < 482 ~ "non-impacted",
+    TRUE ~ "no_sample")) |> 
+  mutate(hma_cat = case_when(
+    `habitat_model_affinity_score_score_0_100` < 60 ~ "impacted",
+    `habitat_model_affinity_score_score_0_100` >=61 ~ "non-impacted",
+    TRUE ~ "no_sample")) |> 
+      mutate(nitrogen_cat = case_when(
+        `nitrogen_ug_L` > 483 ~"impacted",
+        `nitrogen_ug_L` < 482 ~ "non-impacted",
+        TRUE ~ "no_sample")) |> 
+      mutate(diss_oxy_cat = case_when(
+        (`dissolved_oxygen_mg_L` < 5 | `dissolved_oxygen_mg_L` > 9) ~ "impacted",
+        (`dissolved_oxygen_mg_L` > 5 & `dissolved_oxygen_mg_L` < 9) ~ "non-impacted",
+        TRUE ~ "no_sample")) |> 
+      mutate(spc_cat = case_when(
+        `specific_conductance_uS_cm` > 1000 ~ "impacted",
+        `specific_conductance_uS_cm` <= 999 ~ "non-impacted",
+        TRUE ~ "no_sample")) |> 
+      mutate(ph_cat = case_when(
+        (`ph` > 8.5 | `ph` < 6.5) ~ "impacted",
+        (`ph`>= 6.6 & `ph` < 8.5) ~ "non-impacted",
+        TRUE ~ "no_sample")) 
+# 
+# |> 
+#       mutate(contact_cat = case_when(
+#         "primary_contact_recreation" >= 3 ~ "impacted",
+#         "primary_contact_recreation" < 3 & "primary_contact_recreation" > 0 ~ "non-impacted",
+#         TRUE ~ "no_sample"))
+
+#limit to just 2018 version
+
+spl_categories<-spl_categories |> 
+ mutate(year = lubridate::year(EVENT_DATETIME)) |> 
+  filter(year > 2017) #since we dont have much chemistry before then
+  
+spl_categories<-sf::st_as_sf(spl_categories)
+
+#create sf object
+spl_categories <- sf::st_as_sf(spl_categories,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+```
+
+run the category ones - extent
+
+```{r run cat analysis spl,message=FALSE,error=FALSE,warning=FALSE}
+
+standard_ests_phos<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "phos_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+plot_standard_ests(standard_ests_phos,"Phosphorus",ylab = "Result Value",xlab = "Stream Categories")
+
+standard_ests_tkn<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "tkn_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+plot_standard_ests(standard_ests_tkn,"TKN",ylab = "Result Value",xlab = "Stream Categories")
+
+
+standard_ests_chl<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "chl_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+plot_standard_ests(standard_ests_chl,"Chloride",ylab = "Result Value",xlab = "Stream Categories")
+
+
+standard_ests_amm<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "amm_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+plot_standard_ests(standard_ests_amm,"Ammonia",ylab = "Result Value",xlab = "Stream Categories")
+
+
+standard_ests_bap<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "bap_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+plot_standard_ests(standard_ests_bap,"BAP",ylab = "Result Value",xlab = "Stream Categories")
+
+standard_ests_nit<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "nitrogen_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+standard_ests_habitat<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "hma_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+standard_ests_do<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "diss_oxy_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+# standard_ests_contact<-spsurvey::cat_analysis(
+#   dframe = spl_categories,
+#   vars = "contact_cat",
+#   siteID = "SITE_CODE",
+#   weight = "adj_wgt"
+# )
+
+standard_ests_ph<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "ph_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+standard_ests_spc<-spsurvey::cat_analysis(
+  dframe = spl_categories,
+  vars = "spc_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt"
+)
+
+
+
+#merge them together
+
+standard_ests_spl_all<-rbind(#standard_ests_bap,
+                             standard_ests_amm,
+                             standard_ests_nit,
+                             standard_ests_phos,
+                             standard_ests_tkn,
+                             standard_ests_chl,
+                             standard_ests_do,
+                             standard_ests_ph,
+                             standard_ests_spc,
+                             standard_ests_habitat)
+
+standard_ests_spl_all<-standard_ests_spl_all |> 
+  filter(Category %in% c("impacted","non-impacted")) |> 
+  mutate(Category = case_when(Category %in% 'non-impacted'~ 'Non-Impacted',
+                              Category %in% 'impacted'~'Impacted',
+                              TRUE ~ Category)) |> 
+  mutate(Indicator = factor(Indicator, levels = c("amm_cat","tkn_cat","phos_cat","nitrogen_cat",
+                                                  "spc_cat","chl_cat","diss_oxy_cat","ph_cat",
+                                                  "bap_cat","hma_cat"))) |> 
+  group_by(Indicator,Category) |> 
+  mutate(Estimate.P_clean = round(Estimate.P, digits = 0))
+
+#make them prettier
+standard_ests_spl_all$Indicator<-dplyr::recode(standard_ests_spl_all$Indicator,
+                                               "amm_cat" = "Ammonia",
+                                               "tkn_cat" = "Kjeldahl Nitrogen",
+                                               "phos_cat" = "T. Phosphorus",
+                                               "nitrogen_cat" = "T. Nitrogen",
+                                               "spc_cat" = "Specific Conductance",
+                                               "chl_cat" = "Chloride",
+                                               "diss_oxy_cat" = "Dissolved Oxygen",
+                                               "ph_cat" = "pH",
+                                               "bap_cat" = "BAP Score",
+                                               "hma_cat" = "Habitat Score")
+
+plot_extent<-ggplot2::ggplot(standard_ests_spl_all, aes(x=standard_ests_spl_all$Indicator, y=standard_ests_spl_all$Estimate.P)) +
+  #geom_bar(stat="identity",aes(fill=standard_ests_spl_all$Indicator)) +
+  geom_bar(stat="identity",fill ="#233F2B") +
+  geom_crossbar( aes(x=factor(standard_ests_spl_all$Indicator), y=standard_ests_spl_all$Estimate.P, ymin=standard_ests_spl_all$LCB95Pct.P, ymax=standard_ests_spl_all$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= standard_ests_spl_all$LCB95Pct.P,
+                    ymax= standard_ests_spl_all$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  geom_text(aes(label = paste(Estimate.P_clean,"%",sep = ""), vjust = -0.1))+
+  coord_flip()+ggtitle(label = "Extent")+
+  theme(legend.position = "none")+
+  labs(y = "Estimated % of Stream Miles in NYS",
+       x = " Indicator Categories")+
+  theme_minimal()
+plot_extent + facet_wrap(~Category)
+
+```
+
+```{r plot just the impacted ones}
+
+standard_ests_spl_all_short<-standard_ests_spl_all |> 
+  filter(Category %in% "Impacted")
+
+plot_extent_impaired<-ggplot2::ggplot(standard_ests_spl_all_short, aes(x=Indicator, y=Estimate.P)) +
+  #geom_bar(stat="identity",aes(fill=standard_ests_spl_all$Indicator)) +
+  geom_bar(stat="identity",fill ="#233F2B") +
+  geom_crossbar( aes(x=Indicator, y=Estimate.P, 
+                     ymin=LCB95Pct.P, 
+                     ymax=UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= LCB95Pct.P,
+                    ymax= UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  geom_text(aes(label = paste(Estimate.P_clean,"%",sep = ""), vjust = -0.1))+
+  coord_flip()+ggtitle(label = "Extent")+
+  theme(legend.position = "none")+
+  labs(y = "Estimated % of Stream Miles in NYS",
+       x = " Indicator Categories")+
+  theme_minimal()
+plot_extent_impaired
+
+```
+
+##Relative Risk
+
+Relative risk measures the relative strength of association between conditional probabilities defined for a response variable and a stressor variable, where the response and stressor variables are classified as either good (i.e., reference condition) or poor (i.e., different from reference condition). A relative risk value equal to one indicates that the response variable is independent of the stressor variable. Relative risk values greater than one measure the extent to which poor condition of the stressor variable is associated with poor condition of the response variable. https:\_/search.r-project.org/CRAN/refmans/spsurvey/html/relrisk_analysis.html
+
+```{r}
+
+spl_categories2<-spl |> 
+    tidyr::pivot_wider(names_from = parameter_full,
+                     values_from = RESULT_VALUE,
+                     values_fn = function(x) median(x,na.rm = TRUE)) |> 
+   mutate(year = lubridate::year(EVENT_DATETIME)) |> 
+  filter(year > 2017) |> #since we dont have much chemistry before then, and then we just use the adj_weight not adj_weight_all_surveys
+  mutate(phos_cat = case_when((
+    "phosphorus_mg_L" > 0.075) & 
+      (NUTRIENT_ECOREGION %in% c("7","14"))&
+      (`bap_biological_assessment_profile_score_0_10`< 5) ~ "Poor",
+    (`phosphorus_mg_L` > 0.030) & 
+      (NUTRIENT_ECOREGION %in% c("8","11"))&
+      (`bap_biological_assessment_profile_score_0_10`< 5) ~ "Poor",
+    is.na(`phosphorus_mg_L`)~ "no_sample",
+    TRUE~ "Good")) |> 
+  mutate(chl_cat = case_when(
+    `chloride_ug_L` > 250000 ~ "Poor",
+    is.na(`chloride_ug_L`)~ "no_sample",
+    TRUE ~ "Good")) |> 
+  mutate(amm_cat = case_when(
+    `ammonia_ug_L` > 2000 ~ "Poor", #this may hae to be changed
+    is.na(`ammonia_ug_L` )~"no_sample",
+    TRUE ~ "Good")) |> 
+  mutate(tkn_cat = case_when(
+    `kjeldahl_nitrogen_ug_L` > 2500 ~ "Poor",
+    is.na(`kjeldahl_nitrogen_ug_L`)~ "no_sample",
+    TRUE ~ "Good")) |> #used AJ's paper
+  mutate(bap_cat = case_when(
+    `bap_biological_assessment_profile_score_0_10` >=5 ~ "Good",
+    `bap_biological_assessment_profile_score_0_10` %in% "" ~ "no_sample",
+    is.na(`bap_biological_assessment_profile_score_0_10`)~"no_sample",
+    TRUE~"Poor")) |> 
+  mutate(nitrogen_cat = case_when(
+    `nitrogen_ug_L` > 483 ~"Poor",
+    `nitrogen_ug_L` < 482 ~ "Good",
+    TRUE ~ "no_sample")) |> 
+  mutate(hma_cat = case_when(
+    `habitat_model_affinity_score_score_0_100` < 60 ~ "Poor",
+    `habitat_model_affinity_score_score_0_100` >=61 ~ "Good",
+    TRUE ~ "no_sample")) |> 
+      mutate(nitrogen_cat = case_when(
+        `nitrogen_ug_L` > 483 ~"Poor",
+        `nitrogen_ug_L` < 482 ~ "Good",
+        TRUE ~ "no_sample")) |> 
+      mutate(diss_oxy_cat = case_when(
+        (`dissolved_oxygen_mg_L` < 5 | `dissolved_oxygen_mg_L` > 9) ~ "Poor",
+        (`dissolved_oxygen_mg_L` > 5 & `dissolved_oxygen_mg_L` < 9) ~ "Good",
+        TRUE ~ "no_sample")) |> 
+      mutate(spc_cat = case_when(
+        `specific_conductance_uS_cm` > 1000 ~ "Poor",
+        `specific_conductance_uS_cm` <= 999 ~ "Good",
+        TRUE ~ "no_sample")) |> 
+      mutate(ph_cat = case_when(
+        (`ph` > 8.5 | `ph` < 6.5) ~ "Poor",
+        (`ph`>= 6.6 & `ph` < 8.5) ~ "Good",
+        TRUE ~ "no_sample")) 
+
+#write a function to do this
+risk_spsurvey<-function(df,stressor,response){
+  risk_df<-df
+  
+  risk_df<-risk_df |> 
+    filter(stressor != "no_sample")
+  
+  #run the survey
+  relrisk_list<-spsurvey::relrisk_analysis(risk_df,
+  vars_response = response,
+  vars_stressor = stressor, 
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  xcoord = "longitude",
+  ycoord = "latitude")
+  
+}
+
+
+hma_risk<-risk_spsurvey(df = spl_categories2, 
+                        response = "bap_cat",
+                        stressor = "hma_cat")
+#worked! now we'll do the rest of them
+phos_risk<-risk_spsurvey(df = spl_categories2,
+              response = "bap_cat",
+              stressor = "phos_cat")
+amm_risk<-risk_spsurvey(df = spl_categories2,
+              response = "bap_cat",
+              stressor = "amm_cat")
+spc_risk<-risk_spsurvey(df = spl_categories2,
+              response = "bap_cat",
+              stressor = "spc_cat")
+tkn_risk<-risk_spsurvey(df = spl_categories2,
+              response = "bap_cat",
+              stressor = "tkn_cat")
+nitrogen_risk<-risk_spsurvey(df = spl_categories2,
+              response = "bap_cat",
+              stressor = "nitrogen_cat")
+diss_oxy_risk<-risk_spsurvey(df = spl_categories2,
+              response = "bap_cat",
+              stressor = "diss_oxy_cat")
+
+ph_risk<-risk_spsurvey(df = spl_categories2,
+              response = "bap_cat",
+              stressor = "ph_cat")
+
+#bind them
+
+risk_all<-rbind(hma_risk,phos_risk,amm_risk,spc_risk,tkn_risk,nitrogen_risk,diss_oxy_risk,ph_risk)
+
+risk_all<-risk_all |> 
+    mutate(Stressor = factor(Stressor, levels = c("amm_cat","tkn_cat","phos_cat","nitrogen_cat",
+                                                  "spc_cat","chl_cat","diss_oxy_cat","ph_cat",
+                                                  "bap_cat","hma_cat"))) |> 
+    group_by(Stressor) |> 
+  mutate(Estimate_clean = round(Estimate, digits = 1))
+
+risk_all$Stressor<-dplyr::recode(risk_all$Stressor,
+                                               "amm_cat" = "Ammonia",
+                                               "tkn_cat" = "Kjeldahl Nitrogen",
+                                               "phos_cat" = "T. Phosphorus",
+                                               "nitrogen_cat" = "T. Nitrogen",
+                                               "spc_cat" = "Specific Conductance",
+                                               "chl_cat" = "Chloride",
+                                               "diss_oxy_cat" = "Dissolved Oxygen",
+                                               "ph_cat" = "pH",
+                                               "bap_cat" = "BAP Score",
+                                               "hma_cat" = "Habitat Score")
+
+
+
+
+#plot them!!
+
+plot_risk<-risk_all |> 
+  ggplot2::ggplot(aes(x=risk_all$Stressor,
+                                         y=risk_all$Estimate)) +
+  geom_bar(stat="identity",fill ="#233F2B") +
+  geom_crossbar( aes(x=Stressor, y=Estimate, ymin=LCB95Pct, ymax=UCB95Pct), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= LCB95Pct,
+                    ymax= UCB95Pct),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.05)+
+  geom_text(aes(label = Estimate_clean, vjust = -0.1))+
+  coord_flip()+ggtitle(label = "Relative Risk")+
+  theme(legend.position = "none")+
+  labs(y = "Relative Risk Factor",
+       x = "")+
+  geom_hline(yintercept = 1, color = "#FACE00", width = 0.1)+
+  theme_minimal()
+plot_risk
+
+```
+
+## Attributable risk
+
+Attributable risk values close to zero indicate that removing the stressor variable will have little or no impact on the probability that the response variable is in poor condition. Attributable risk values close to one indicate that removing the stressor variable will result in extensive reduction of the probability that the response variable is in poor condition. https://search.r-project.org/CRAN/refmans/spsurvey/html/attrisk_analysis.html
+
+```{r}
+try<-spl_categories2 |> 
+  filter(nitrogen_cat != "no_sample")
+
+attrisk_spl<-spsurvey::attrisk_analysis(try,
+  vars_response = "bap_cat",
+  vars_stressor = "nitrogen_cat", 
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  xcoord = "longitude",
+  ycoord = "latitude")
+
+
+#write a function to do this
+attrib_risk_spsurvey<-function(df,stressor,response){
+  risk_df<-df
+  
+  risk_df<-risk_df |> 
+    filter(response != "no_sample") |> 
+    filter(stressor != "no_sample")
+  
+  #run the survey
+  relrisk_list<-spsurvey::attrisk_analysis(risk_df,
+  vars_response = response,
+  vars_stressor = stressor, 
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  xcoord = "longitude",
+  ycoord = "latitude")
+  
+}
+
+hma_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "hma_cat")
+
+tkn_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "tkn_cat")
+nitrogen_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "nitrogen_cat")
+diss_oxy_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "diss_oxy_cat")
+ph_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "ph_cat")
+phos_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "phos_cat")
+amm_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "amm_cat")
+spc_attrib_risk<-attrib_risk_spsurvey(df = spl_categories2,
+                        response = "bap_cat",
+                        stressor = "spc_cat")
+
+attrib_risk_all<-rbind(hma_attrib_risk,tkn_attrib_risk,nitrogen_attrib_risk,
+                       diss_oxy_attrib_risk,ph_attrib_risk,phos_attrib_risk,
+                       amm_attrib_risk,spc_attrib_risk)
+
+
+attrib_risk_all<-attrib_risk_all |> 
+    mutate(Stressor = factor(Stressor, levels = c("amm_cat","tkn_cat","phos_cat","nitrogen_cat",
+                                                  "spc_cat","chl_cat","diss_oxy_cat","ph_cat",
+                                                  "bap_cat","hma_cat"))) |> 
+    group_by(Stressor) |> 
+  mutate(Estimate_clean = round(Estimate*100, digits = 1))
+
+attrib_risk_all$Stressor<-dplyr::recode(attrib_risk_all$Stressor,
+                                               "amm_cat" = "Ammonia",
+                                               "tkn_cat" = "Kjeldahl Nitrogen",
+                                               "phos_cat" = "T. Phosphorus",
+                                               "nitrogen_cat" = "T. Nitrogen",
+                                               "spc_cat" = "Specific Conductance",
+                                               "chl_cat" = "Chloride",
+                                               "diss_oxy_cat" = "Dissolved Oxygen",
+                                               "ph_cat" = "pH",
+                                               "bap_cat" = "BAP Score",
+                                               "hma_cat" = "Habitat Score")
+
+plot_attrib_risk<-attrib_risk_all |> 
+  ggplot2::ggplot(aes(x=Stressor,y=Estimate*100)) +
+  geom_bar(stat="identity",fill ="#233F2B") +
+  geom_crossbar( aes(x=Stressor, y=Estimate *100, ymin=LCB95Pct*100, ymax=UCB95Pct*100), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= LCB95Pct,
+                    ymax= UCB95Pct),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  geom_text(aes(label = paste(Estimate_clean,"%",sep = ""), vjust = -0.1))+
+  coord_flip()+ggtitle(label = "Attributable Risk")+
+  theme(legend.position = "none")+
+  labs(y = "Attributable Risk",
+       x = "")+
+  theme_minimal()
+plot_attrib_risk
+
+```
+
+```{r put plots together, fig.width=10}
+
+library(patchwork)
+
+plot_extent_impaired +plot_risk + plot_attrib_risk +plot_layout(nrow = 1,ncol = 3,axis_titles = "collect",guides = "collect",axes = "collect")
+
+
+```
+
+## check some of those assumptions and big ones
+
+```{r}
+
+spl_categories2<-spl_categories2 |> 
+  filter(bap_cat != "no_sample")
+
+check<-ggplot2::ggplot(spl_categories2, aes(x=bap_cat,
+                                         y=spl_categories2$`nitrogen_ug_L`)) +
+ geom_boxplot(fill = "#233F2B", alpha = 0.4) +
+  geom_jitter(color = "#FACE00",alpha = 0.5)+
+  ggtitle(label = "BAP Categories x Parameters")+
+  theme(legend.position = "none")+
+  labs(y = "TN (ug/L)",
+       x = "BAP Categories")+
+  theme_minimal()
+check
+
+
+check2<-ggplot2::ggplot(spl_categories2, aes(x=bap_cat,
+                                         y=spl_categories2$`phosphorus_mg_L`)) +
+  geom_boxplot(fill = "#233F2B", alpha = 0.4) +
+  geom_jitter(color = "#FACE00",alpha = 0.5)+
+  ggtitle(label = "")+
+  theme(legend.position = "none")+
+  scale_y_log10()+
+  labs(y = "Phos mg/L)",
+       x = "BAP Categories")+
+  theme_minimal()
+check2
+
+check3<-ggplot2::ggplot(spl_categories2, aes(x=bap_cat,
+                                         y=spl_categories2$`dissolved_oxygen_mg_L`)) +
+  geom_boxplot(fill = "#233F2B", alpha = 0.4) +
+  geom_jitter(color = "#FACE00",alpha = 0.5)+
+  ggtitle(label = "")+
+  theme(legend.position = "none")+
+  scale_y_log10()+
+  labs(y = "Dissolved Oxygen mg/L)",
+       x = "BAP Categories")+
+  theme_minimal()
+check3
+
+check4<-ggplot2::ggplot(spl_categories2, aes(x=bap_cat,
+                                         y=spl_categories2$`habitat_model_affinity_score_score_0_100`)) +
+  geom_boxplot(fill = "#233F2B", alpha = 0.4) +
+  geom_jitter(color = "#FACE00",alpha = 0.5)+
+  ggtitle(label = "")+
+  theme(legend.position = "none")+
+  scale_y_log10()+
+  labs(y = "HMA Score (0-100)",
+       x = "BAP Categories")+
+  theme_minimal()
+check4
+
+
+check5<-ggplot2::ggplot(spl_categories2, aes(x=bap_cat,
+                                         y=spl_categories2$`specific_conductance_uS_cm`)) +
+  geom_boxplot(fill = "#233F2B", alpha = 0.4) +
+  geom_jitter(color = "#FACE00",alpha = 0.5)+
+  ggtitle(label = "")+
+  theme(legend.position = "none")+
+  scale_y_log10()+
+  labs(y = "Specific Conductance (us/cm)",
+       x = "BAP Categories")+
+  theme_minimal()
+check5
+
+check6<-ggplot2::ggplot(spl_categories2, aes(x=bap_cat,
+                                         y=spl_categories2$`ammonia_ug_L`)) +
+  geom_boxplot(fill = "#233F2B", alpha = 0.4) +
+  geom_jitter(color = "#FACE00",alpha = 0.5)+
+  ggtitle(label = "")+
+  theme(legend.position = "none")+
+  scale_y_log10()+
+  labs(y = "Ammonia (ug/L)",
+       x = "BAP Categories")+
+  theme_minimal()
+check6
+
+
+check+ check2+ check4 + check3 +plot_layout(nrow = 2,ncol = 2,axis_titles = "collect",guides = "collect",axes = "collect")
+```
+
+## stayCALM data
+
+```{r, fig.width= 5, fig.height=3}
+viols<-readRDS("outputs/violation_data_probabilistic.RDS")
+
+params_viols<-viols |> 
+  filter(attaining_wqs %in%"no") |> 
+  filter(date > "2017-01-01") |> 
+  group_by(parameter) |> 
+  summarise(n= length(unique(seg_id)))
+
+cat_viol<-viols |> 
+  filter(date > "2017-01-01") |> 
+  select(seg_id,site_id,attaining_wqs,parameter,result,adj_wgt) |> 
+  distinct()
+
+#merge in the locational data
+
+location<-stream_df |> 
+  select(site_id = SITE_CODE,latitude,longitude,adj_wgt_all_surveys) |> 
+  distinct()
+
+cat_viols.sf<-merge(cat_viol,location,
+                    by = "site_id")
+
+cat_viols.sf <-cat_viols.sf |> 
+  filter(!is.na(attaining_wqs),
+         adj_wgt_all_surveys >0) |> 
+  mutate(attaining_wqs = case_when(
+    attaining_wqs %in% "yes"~ "No violations",
+    attaining_wqs %in% "no" ~ "Violations Present",
+    attaining_wqs %in% "threshold_data_absent" ~ "Threshold data absent",
+    TRUE ~ attaining_wqs
+  ))
+
+cat_viols_all<-cat_viols.sf |> 
+  group_by(site_id,parameter) |> 
+  mutate(count = n()) |> 
+  ungroup() |> 
+  select(-c(parameter,result,adj_wgt_all_surveys)) |> 
+  distinct() |> 
+  group_by(site_id,attaining_wqs) |> 
+  mutate(count = sum(count)) |> 
+  distinct() |> 
+  tidyr::pivot_wider(names_from = attaining_wqs,
+                     values_from = count) |> 
+  distinct() |> 
+  mutate(final_wqs= case_when(`Violations Present` > 0 ~ "Violations Present",
+    (is.na(`Violations Present`) & `No violations` > 0)~ "No violations",
+                              (is.na(`Violations Present`) & is.na(`No violations`) & `Threshold data absent` >0) ~"Thresholds absent",
+                              
+                              TRUE ~ "error"))
+
+#create the tier to have viols or no
+
+
+#create sf object
+ca.sf <- sf::st_as_sf(cat_viols_all,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+viols_standard_ests<-spsurvey::cat_analysis(
+  dframe = ca.sf,
+  vars = "final_wqs",
+  siteID = "site_id",
+  weight = "adj_wgt"
+  #subpops = "parameter"
+)
+
+viols_standard_ests<-viols_standard_ests %>% 
+  filter(Category != "Total") |> 
+  group_by(Category) |> 
+  mutate(Estimate.P_clean = round(Estimate.P, digits = 0))
+
+
+plot_viols<-ggplot2::ggplot(viols_standard_ests, aes(x=Category, y=Estimate.P)) +
+  geom_bar(stat="identity",fill ="#233F2B", alpha = 0.9) +
+  geom_crossbar( aes(x=factor(Category), y=Estimate.P, ymin=LCB95Pct.P, ymax=UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_text(aes(label = paste(Estimate.P_clean,"%",sep = ""), vjust = -0.1))+
+  geom_errorbar(aes(ymin= LCB95Pct.P,
+                    ymax= UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.05)+
+  coord_flip()+ggtitle(label = "CALM Categories")+
+  theme(legend.position = "none")+
+  scale_x_discrete(limits = rev)+
+  labs(y = "Estimated % of Stream Miles in NYS",
+       x = "")+
+  theme_minimal()+
+  theme(legend.position="none")
+  
+
+plot_viols
+
+
+
+```
+
+## Trend Potential
+
+```{r, message=FALSE,warning=FALSE}
+#change analysis
+
+metrics.sf_13_18<-metrics.sf %>% 
+  mutate(draw_year = start) |> 
+  filter(draw_year %in% c("2018","2013")) 
+
+change<-spsurvey::change_analysis(metrics.sf_13_18,
+                         #vars_cont = "RESULT_VALUE",
+                         vars_cat = "standard_cat",
+                         surveyID = "draw_year",
+                         siteID = "SITE_ID",
+                         weight = "adj_wgt",
+                         #subpops = "BASIN.y",
+                         All_Sites = TRUE)
+
+metrics.sf_08_13<-metrics.sf %>% 
+    mutate(draw_year = start) |> 
+  filter(draw_year %in% c("2008","2013")) |> 
+  arrange(draw_year)
+
+change_08_13<-spsurvey::change_analysis(metrics.sf_08_13,
+                         #vars_cont = "RESULT_VALUE",
+                         vars_cat = "standard_cat",
+                         surveyID = "draw_year",
+                         siteID = "SMAS_ID",
+                         weight = "adj_wgt",
+                         #subpops = "BASIN",
+                         All_Sites = TRUE)
+
+combo_change_ests<-rbind(change$catsum,change_08_13$catsum)
+
+combo_change_ests$years<-paste(combo_change_ests$Survey_1,
+                               combo_change_ests$Survey_2,
+                               sep = "_")
+
+combo_change_short<-combo_change_ests |> 
+  filter(Type %in% "All_Sites") |> 
+  mutate(Category = factor(Category, levels = c("Non-Impacted","Slightly Impacted",
+                                                "Moderately Impacted","Severly Impacted")))#limit to just statewide for now
+
+
+plot_change<-ggplot2::ggplot(combo_change_short, aes(x=factor(combo_change_short$years),y=combo_change_short$DiffEst.P)) +
+  geom_point(size = 4) +
+  geom_line()+
+   geom_hline(yintercept = 0,linetype='dotted', col = 'red')+
+  scale_fill_manual(values = c('#233F2B', '#FACE00'))+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= combo_change_short$LCB95Pct.P,
+                    ymax= combo_change_short$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  theme_minimal()+
+  #add the statewide in here
+
+  coord_flip()+
+  ggtitle(label = "BAP Score Change (in % pts)")+
+  labs(y = "Change Estimate", x = "Sampling Round")
+
+
+plot_change+facet_wrap(~Category)
+```

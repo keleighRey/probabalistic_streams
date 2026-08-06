@@ -36,6 +36,7 @@ sites_list <- read.csv(here::here(params$file), stringsAsFactors = FALSE)
 
 Grab chemistry and pcode data 
 
+
 ```{r get-bug-data}
 
 metrics<-fetch::fetch_bugs(path = "C:/Users/kareynol/OneDrive - New York State Office of Information Technology Services/Streams Data Modernization/Cleaned Files",output = "standard")
@@ -172,7 +173,7 @@ standard_ests<-spsurvey::cat_analysis(
 )
 
 
-
+library(ggplot2)
 plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
   geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
   geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+

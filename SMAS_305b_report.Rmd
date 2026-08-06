@@ -31,6 +31,7 @@ library(spsurvey)
 #source("grab_data.R", local = TRUE)
 source("map_maker.R", local = TRUE)
 ```
+
 ```{r get-estimate, echo=FALSE}
 get_estimate <- function(basin) {
   sps_data_final[sps_data_final$`Major Drainage Basin` %in% basin, "Estimated Average BAP Score"]
