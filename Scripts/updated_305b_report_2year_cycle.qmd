@@ -1,0 +1,13 @@
+---
+title: "305(b) Report_updated"
+format: html
+editor: visual
+---
+
+# Streams Probabilistic Sampling: 2024-2025
+
+Probability based sampling was conducted by the [Rotating Integrated Basin Studies (RIBS) Program](https://www.dec.ny.gov/chemical/23848.html) during a 2-year period (2024-2025). RIBS monitoring is conducted approximately 1/2 of New York State's 17 major drainage basins each year, providing statewide coverage over a 2-year cycle. Probability based sampling follows the Generalized Random Tessellation Stratified (GRTS) survey design introduced by Stevens and Olsen (2004). RIBS implements GRTS with random stratified by stream size (Strahler Order). This survey design provides spatially balanced sampling, enabling the RIBS program to make representative water quality evaluations at the major drainage basin or state-wide scale.
+
+For this analysis, Biological Assessment Profile (BAP) scores were used for basic condition estimates across the state.
+
+DEC's BAP summarizes biological community data into a score ranging from 0-10, where zero is the most disturbed and ten is the least disturbed community. Scores of five or greater are considered to represent natural or slightly altered water quality, while scores less than five represent substantially altered water quality. This analysis focused on aquatic insects and other invertebrates visible with the naked eye, collectively referred to as benthic macroinvertebrates. Benthic macroinvertebrates communities are a useful indicator of water quality because these organisms must survive and propagate in water quality conditions prior to monitoring. For more information on DEC's benthic macroinvertbrate collection methods and BAP calculations, please see DEC's [Biomonitoring SOP](https://www.dec.ny.gov/docs/water_pdf/sop20821biomonitoring.pdf) and [Bioassessment Fact Sheet.](https://www.dec.ny.gov/docs/water_pdf/bapnarrative18.pdf)

@@ -32,18 +32,26 @@ Read in the .shp file for the basins.
 ```{r}
 basin_path <- "L:/DOW/BWAM Share/SMAS/data/archive/map_files"
 # basin_path <- "L:/BWAM Share/SMAS/data/archive/map_files" #for keleigh
+# 
+# basin <- rgdal::readOGR(
+#   dsn = basin_path,
+#   layer = "basin_big",
+#   verbose = FALSE
+# )
+#using sf package since rdgal doesnt work with this version of R
 
-basin <- rgdal::readOGR(
-  dsn = basin_path,
-  layer = "basin_big",
-  verbose = FALSE
-)
+basin <- sf::read_sf("L:/DOW/BWAM Share/SMAS/data/archive/map_files/basin_big.shp") 
+
+#sf::st_crs(basin)
+
+basin_shp<-st_crs("+proj=longlat +datum=WGS84 +no_defs")
 
 # change coords to web mercator for the map
-basin_shp <- sp::spTransform(
-  basin,
-  sp::CRS("+proj=longlat +datum=WGS84 +no_defs")
-)
+basin_shp <- st_transform(
+  basin, crs = "+proj=longlat +datum=WGS84 +no_defs")
+
+
+
 ```
 
 Get the state outline
@@ -52,6 +60,7 @@ Get the state outline
 states <- sf::st_as_sf(map("state",
                            plot = FALSE,
                            fill = TRUE))
+
 nys <- states %>%
   filter(ID == "new york")
 
@@ -70,41 +79,44 @@ bbox_new[3] <- bbox_new[3] + (0.4 * xrange) # xmax - right
 # bbox_new[2] <- bbox_new[2] - (0.25 * yrange) # ymin - bottom
 bbox_new[4] <- bbox_new[4] + (0.2 * yrange) # ymax - top
 
-bbox_new <- bbox_new %>% # take the bounding box ...
-  st_as_sfc() # ... and make it a sf polygon
-# checking SSL
+
+bbox_new<-st_as_sfc(bbox_new) #create an SF object from this
+
 ```
 
 Print the map
 
 ```{r}
-# basin_map <- tm_basemap(c(
+basin_map <- 
+  # tmap_options(check.and.fix = TRUE) +
+  # tmap::tm_shape(nys, bbox = bbox_new) +
+  # tmap::tm_fill() +
+  tm_shape(basin_shp,
+    bbox = bbox_new
+  ) +
+#   tm_basemap(c(
 #   StreetMap = "OpenStreetMap",
 #   TopoMap = "OpenTopoMap"
 # )) +
-#   # tmap_options(check.and.fix = TRUE) +
-#   # tmap::tm_shape(nys, bbox = bbox_new) +
-#   # tmap::tm_fill() +
-#   tm_shape(basin_shp,
-#     bbox = bbox_new
-#   ) +
-#   tm_fill(col = "Basin__", alpha = .9, title = "Basin ID") +
-#   tm_borders() +
-#   tm_scale_bar(position = c("left", "bottom"), width = 0.15) +
-#   tm_compass(position = c("left", "top"), size = 2) +
-#   tm_layout(
-#     title = "Statewide Probabalistic Analysis",
-#     legend.position = c("right", "top")
-#   ) +
-#   tm_credits("Data source:2016-2021 ",
-#     fontface = "italic",
-#     align = "right"
-#   ) +
-#   tm_credits("Author: SMAS ",
-#     fontface = "bold",
-#     align = "right"
-#   )
-# basin_map
+  tm_fill(col = "Basin__", alpha = .9, title = "Basin ID") +
+  tm_borders() +
+  tm_scale_bar(position = c("left", "bottom")) +
+  tm_compass(position = c("left", "bottom")) +
+  tm_layout(
+    title = "Statewide Probabalistic Analysis",
+    legend.position = c("right", "top")
+  ) +
+  tm_credits("Data source:2016-2021 ",
+    fontface = "italic",
+    align = "right"
+  ) +
+  tm_credits("Author: SMAS ",
+    fontface = "bold",
+    align = "right"
+  )
+
+
+basin_map
 ```
  Append data to plot-have to run the grab_data .RMD first, it will save the output in the outputs folder.
  
@@ -125,24 +137,25 @@ basin_map_append <- merge(basin_shp, sps_data2) # merge data by changing the sub
 
 # viridis magma, specify 0-10 range in the tm_fill; just do the last cycle for the analysis-look this up to see how we do trend analysis-just do last 5
 
-basin_map2 <- tm_basemap(c(
-  StreetMap = "OpenStreetMap",
-  TopoMap = "OpenTopoMap"
-)) +
+basin_map2 <- 
   # tmap::tm_shape(nys,
   #                bbox = bbox_new) +
   # tmap::tm_fill() +
   tm_shape(basin_map_append,
     bbox = bbox_new
   ) +
+#   tm_basemap(c(
+#   StreetMap = "OpenStreetMap",
+#   TopoMap = "OpenTopoMap"
+# )) +
   tm_fill(
     col = "Estimate", alpha = .9,
     breaks = c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
     title = "Estimated BAP", palette = "-viridis"
   ) +
   tm_borders() +
-  tm_scale_bar(position = c("left", "bottom"), width = 0.15) +
-  tm_compass(position = c("left", "top"), size = 2) +
+  tm_scale_bar(position = c("left", "bottom")) +
+  tm_compass(position = c("left", "bottom")) +
   tm_layout(title = "Statewide Probabalistic Analysis",
             legend.position = c("right", "top")) +
   tm_credits("Data source:2017-2021 ",

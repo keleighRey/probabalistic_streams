@@ -12,7 +12,7 @@ clean_v2 <- read_csv(
 comid_wgt <- read_csv(
   file = here::here("outputs",
                     "comid_adj_wgt_all_years.csv")#this is the EPA file created by KR that has 
-  #just COMID, wgt and draw year (which was not set up quite correctly.)
+  #just COMID, wgt and draw year
 )
 comid_wgt$...1 <- NULL #cleaning up the columns
 comid <- separate(
@@ -21,6 +21,7 @@ comid <- separate(
   sep = "_",
   into = c("start", "end")#separating the draw years into start year and end year
 )
+
 
 joined <- left_join(
   x = clean_v2,
@@ -157,4 +158,5 @@ sub_df_3<-sub_df_2 %>%
 # I beleive it IS possible we have duplicate COMIDs, but they will have different matching years
 #so that's ok.
 
+write.csv(sub_df_3,"outputs/prob_site_adj_wgt_kar.csv")
 write.csv(sub_df_3,"outputs/prob_site_adj_wgt_kar.csv")

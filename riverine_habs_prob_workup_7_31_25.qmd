@@ -1,0 +1,167 @@
+---
+title: "riverine_habs_workup"
+format: html
+editor: visual
+---
+
+## 
+
+## Introduction
+
+Probabilistic Code using the parquet files for the base of the analysis.
+
+## Read in the files
+
+Using the updated BWAM analytics file for prep. Read in the parquet file first and load libraries
+
+```{r message=FALSE}
+library(arrow)
+library(readr)
+library(ggplot2)
+library(spsurvey)
+library(dplyr)
+
+
+#read in the merged data file from probabilistic_initial_data_workup
+#write to RDS to use in other scripts
+stream_df_merged<-readRDS(here::here("outputs/Probabilistic_data_workup_2_6_25.rds"))
+
+```
+
+Establish plotting function
+
+```{r}
+#plotting function
+
+plot_standard_ests<-function(df,title,ylab,xlab){
+  
+  plot<-ggplot2::ggplot(df, aes(x=factor(df$Subpopulation), y=df$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=df$Subpopulation)) +
+  geom_crossbar( aes(x=factor(df$Subpopulation), y=df$Estimate.P, ymin=df$LCB95Pct.P, ymax=df$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= df$LCB95Pct.P,
+                    ymax= df$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = title)+
+  theme(legend.position = "none")
+
+plot+facet_wrap(~Category) + ylab(ylab)+xlab(xlab)
+
+}
+
+#make a list of the available parameters
+params<-stream_df_merged |> 
+  select(PARAMETER_NAME,UNIT) |> 
+  unique()
+
+```
+
+SO we're going to do a continuous analysis with the HAB data, so first we'll subset to the hab parameters AND to the scrapes vs. water columns
+
+```{r}
+
+habs<-stream_df_merged |> 
+  dplyr::filter(PARAMETER_NAME %in% c(
+    "microcystin",
+    "anatoxin_a",
+    "periphyton",
+    "estimated_diatom_coverage"))
+
+#sample_location is where we have scrape vs. water column
+
+scrapes<-habs |> 
+  dplyr::filter(SAMPLE_LOCATION %in% "scrape")
+
+water_column_habs<-habs |> 
+  dplyr::filter(SAMPLE_LOCATION %in% "flow_water")
+
+
+```
+
+alright, now we have it subset to the correct information - we can do a continuous analysis for any of the parameters that we'd like - or a categorial analysis as well
+
+```{r}
+
+#first we'll do continuous for anatoxin in the scrapes
+
+scrapes<-scrapes %>% 
+  dplyr::rename(latitude = LATITUDE,
+         longitude = LONGITUDE)
+
+ana_scr<-scrapes |> 
+  dplyr::filter(PARAMETER_NAME %in% "anatoxin_a") |> 
+  filter(adj_wgt >0) |> 
+  mutate(result_adj = case_when(is.na(RESULT_VALUE)~0.5 * METHOD_DETECTION_LIMIT,
+                                RESULT_VALUE == "NA"~ 0.5 * METHOD_DETECTION_LIMIT,
+                                TRUE ~ RESULT_VALUE))
+
+
+#create sf object
+ana_scr.sf <- sf::st_as_sf(ana_scr,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+cont_ests_ana_adj <- spsurvey::cont_analysis(ana_scr.sf,
+  siteID = "SITE_ID",
+  vars = "result_adj",
+  #subpops = "BASIN.x",
+  weight = "adj_wgt" #using the adjusted weights calculatd on 11/22/22 KAR
+)
+
+cont_ests_ana_adj$Mean
+
+ggplot(cont_ests_ana_adj$CDF, aes(Value, Estimate.P,colour = Subpopulation)) + 
+  geom_line()+
+  scale_colour_hue(name="")+
+  xlab("Anatoxin_a ug/g")+
+  ylab("Estimated Proportion of Stream Miles in NYS")+
+  theme_classic()
+```
+
+now we can try the categories
+
+```{r}
+
+ana_scr<-scrapes |> 
+  dplyr::mutate(tox_cat = case_when(RESULT_VALUE > METHOD_DETECTION_LIMIT ~ "detection",
+                             TRUE ~ "non-detect"))
+
+#create sf object
+ana_scr.sf <- sf::st_as_sf(ana_scr,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+ana_scr.sf<-ana_scr.sf |> 
+  filter(adj_wgt >0)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = ana_scr.sf,
+  vars = "tox_cat",
+  siteID = "SITE_ID",
+  weight = "adj_wgt"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total") |> 
+  mutate(Subpopulation = as.numeric(Subpopulation)) |> 
+  arrange(Subpopulation)
+  
+plot_standard_ests(df = standard_ests,title = "Bap Categories",
+                   ylab = "% of Total Stream Miles",
+                   xlab = "Probabilistic Cycle Year")
+
+
+pie(standard_ests$Estimate.P, 
+    labels = paste(standard_ests$Category,
+                   round(standard_ests$Estimate.P, digits = 1), "%", sep = " "),
+    )+
+title("% of Stream Miles")
+
+
+```

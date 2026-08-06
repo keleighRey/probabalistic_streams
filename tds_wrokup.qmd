@@ -1,0 +1,95 @@
+---
+title: "tds"
+format: html
+editor: visual
+---
+
+Looking at the TDS stuff
+
+```{r}
+library(arrow)
+library(readr)
+library(ggplot2)
+library(spsurvey)
+library(dplyr)
+
+#read in the merged data file from probabilistic_initial_data_workup
+#write to RDS to use in other scripts
+stream_df_merged<-readRDS(here::here("outputs/Probabilistic_data_workup_2_6_25.rds"))
+
+
+```
+create the TDS converstions
+```{r}
+
+tds<-stream_df_merged |> 
+  filter(PARAMETER_NAME %in% c("specific_conductance"),
+         UNIT %in% "uS/cm")
+
+tds<-tds |> 
+  mutate(tds_ai_vibe = RESULT_VALUE *0.67,
+         tds_dec = (RESULT_VALUE * 0.563565)+3.965894)
+
+
+
+
+```
+
+create the regional estimates, first we'll divide teh adjusted weight by all survey years (3) so we can have them all count in the same data set
+
+```{r}
+tds<-tds |> 
+  mutate(adj_wgt_all = adj_wgt/3) #adjust teh weights
+  
+#create the regional estimates
+
+tds<-tds %>% 
+  dplyr::rename(latitude = LATITUDE,
+         longitude = LONGITUDE) |> 
+  filter(adj_wgt_all>0)
+
+#create sf objectt
+tds.sf <- sf::st_as_sf(tds,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+cont_ests_tds <- spsurvey::cont_analysis(tds.sf,
+  siteID = "SITE_ID",
+  vars = "tds_dec",
+  subpops = "BASIN.x",
+  weight = "adj_wgt_all" #using the adjusted weights calculatd on 11/22/22 KAR
+)
+
+cont_ests_tds$Mean
+
+ggplot(cont_ests_tds$CDF, aes(Value, Estimate.P,colour = Subpopulation)) + 
+  geom_line()+
+  scale_colour_hue(name="")+
+  xlab("")+
+  ylab("Estimated Proportion of Stream Miles in NYS")+
+  theme_classic()
+
+df<-cont_ests_tds$Mean
+
+plot<-ggplot2::ggplot(df, aes(x=factor(df$Subpopulation), y=df$Estimate)) +
+  geom_bar(stat="identity",aes(fill=df$Subpopulation)) +
+  geom_crossbar( aes(x=factor(df$Subpopulation), y=df$Estimate, ymin=df$LCB95Pct, ymax=df$UCB95Pct), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  geom_errorbar(aes(ymin= df$LCB95Pct,
+                    ymax= df$UCB95Pct),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "Estimated TDS")+
+  theme(legend.position = "none")
+
+
+plot
+  
+
+
+
+```
+
+

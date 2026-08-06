@@ -1,0 +1,226 @@
+---
+title: "spsurvey_stream_data"
+author: "Keleigh Reynolds"
+date: "11/2/2022"
+output: html_document
+params: 
+  user: kareynol
+  file: outputs/prob_site_adj_wgt_kar.csv
+---
+
+install packages
+
+```{r}
+#checkpoint::checkpoint("2022-11-17")
+# # install the most recent approved version from CRAN
+# install.packages("spsurvey")
+# # load the most recent approved version from CRAN
+library(spsurvey)
+
+# view the citation
+# citation(package = "spsurvey")
+library(dplyr)
+# source(here::here("harvesting_COMID_wgt_11_9_22.R"))
+# source(here::here("Scripts/comid_wgt_join.R")) ##run these to match the COMID and wgts from the original EPA draw files. 
+#As of 11/21/22 KAR identified that wgts have to be re-adjustd after determining what was actually sampled. This was updated and included in the analysis now.
+
+
+# test the branch and commit
+```
+
+grab data-sites list
+```{r read-site-list}
+sites_list <- read.csv(here::here(params$file), stringsAsFactors = FALSE)
+```
+
+
+Grab chemistry and pcode data 
+
+
+```{r get-bug-data}
+
+metrics<-fetch::fetch_bugs(path = "C:/Users/kareynol/OneDrive - New York State Office of Information Technology Services/Streams Data Modernization/Cleaned Files",output = "standard")
+
+```
+
+```{r subset-data-to-sites-list}
+
+sites.l<-unique(sites_list$SMAS_ID)
+
+```
+
+Subset to Dates function-we have the list of sites/dates.
+
+```{r}
+
+sites_list$filter_match <- paste(sites_list$SMAS_ID,
+  sites_list$YEAR,
+  sep = "_"
+)
+
+
+metrics.df<-metrics
+
+metrics.final <- metrics.df %>%
+  mutate(
+    YEAR = format(MSSIH_EVENT_SMAS_SAMPLE_DATE, "%Y"),
+    filter_match = paste(MSSIH_EVENT_SMAS_HISTORY_ID,
+      YEAR,
+      sep = "_"
+    )
+  )
+# join the metrics to the final sites file with the wgt
+
+metrics_joined <- merge(sites_list,
+  metrics.final,
+  by = "filter_match"
+)
+unmatched <- anti_join(sites_list,
+  metrics.final,
+  by = "filter_match"
+)
+
+
+```
+
+RUN THE SPSURVEY!!
+So it looks like these files need to have a projection assigned and be an sf object?
+
+We also need to assign the weight back to the COMID or the EPA ID to get that for the analysis to run.
+
+```{r run-spsurvey package}
+# open the template data
+# load(file='data/NE_Lakes.rda')
+
+metrics_joined$YEAR <- metrics_joined$YEAR.x
+metrics_joined <- metrics_joined %>%
+  dplyr::rename(latitude = LAT, longitude = LONG)
+# get basin in there
+metrics_joined$BASIN <- as.numeric(substr(metrics_joined$SMAS_ID, start = 1, stop = 2))
+
+#create-cycle-column
+metrics_joined<-metrics_joined %>% 
+  mutate(cycle = paste(start,end,sep = "_"))
+
+metrics_lhud<-metrics_joined %>% 
+  filter(BASIN %in% "13")
+
+metrics.sf <- sf::st_as_sf(metrics_lhud,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+
+cont_ests <- spsurvey::cont_analysis(metrics.sf,
+  siteID = "MSSIH_EVENT_SMAS_HISTORY_ID",
+  vars = "MMDH_BIO_ASMT_PROFILE_SCORE",
+  subpops = "cycle",
+  weight = "adj_wgt" #using the adjusted weights calculatd on 11/22/22 KAR
+)
+# statewide
+# cont_ests<-spsurvey::cont_analysis(metrics.sf,
+#                                    siteID="MSSIH_EVENT_SMAS_HISTORY_ID",
+#                                    vars="MMDH_BIO_ASMT_PROFILE_SCORE",
+#                                    #subpops = "SITE_BASIN",
+#                                    weight="wgt")
+
+spsurvey::cdf_plot(cont_ests$CDF)
+
+# save the results to outputs
+write.csv(cont_ests$Mean, "outputs/lhud_prob_3_14_24.csv")
+
+spsurvey::sp_summary(metrics.sf, formula = MMDH_BIO_ASMT_PROFILE_SCORE ~ cycle)
+spsurvey::sp_plot(metrics.sf, formula = MMDH_BIO_ASMT_PROFILE_SCORE ~ cycle)
+```
+
+```{r trend-data}
+#as of 11/22/22 this is not working, but will be fun to try
+metrics.sf_2<-metrics.sf %>% 
+  filter(!cycle %in% "2013_2018")
+
+
+change <- spsurvey::change_analysis(
+  metrics.sf_2,
+  siteID = "MSSIH_EVENT_SMAS_HISTORY_ID",
+  vars_cont = "MMDH_BIO_ASMT_PROFILE_SCORE",
+  surveyID = "cycle",
+  weight = "adj_wgt"
+)
+
+```
+
+```{r state-wide-conditions, fig.width=10}
+
+metrics_lhud<-metrics_lhud %>% 
+  mutate(standard_cat = case_when(MMDH_BIO_ASMT_PROFILE_SCORE >= 7.5 ~ "Non-Impacted",
+                                  MMDH_BIO_ASMT_PROFILE_SCORE >=5 & MMDH_BIO_ASMT_PROFILE_SCORE < 7.5~"Slightly Impacted",
+                                  MMDH_BIO_ASMT_PROFILE_SCORE < 5& MMDH_BIO_ASMT_PROFILE_SCORE >=2.5~"Moderately Impacted",
+                                  MMDH_BIO_ASMT_PROFILE_SCORE <2.5~"Severly Impacted",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt >0)
+
+metrics_lhud_sf<-sf::st_as_sf(metrics_lhud,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+standard_ests<-spsurvey::cat_analysis(
+  dframe = metrics_lhud_sf,
+  vars = "standard_cat",
+  siteID = "MSSIH_EVENT_SMAS_HISTORY_ID",
+  weight = "adj_wgt",
+  subpops = "cycle"
+)
+
+
+library(ggplot2)
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "BAP Categories")
+
+plot+facet_wrap(~Category)
+
+```
+
+```{r double-check}
+
+metrics_joined_short<-metrics_joined %>% 
+filter(cycle %in% "2018_2022")  
+
+metrics.sf_all <- sf::st_as_sf(metrics_joined_short,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+
+cont_ests_check <- spsurvey::cont_analysis(
+  metrics.sf_all,
+  siteID = "MSSIH_EVENT_SMAS_HISTORY_ID",
+  vars = "MMDH_BIO_ASMT_PROFILE_SCORE",
+  subpops = "BASIN",
+  weight = "adj_wgt" #using the adjusted weights calculatd on 11/22/22 KAR
+)
+
+```
+```{r}
+library(ggplot2)
+
+plot<-ggplot2::ggplot(metrics_joined,
+                      aes(x=cycle, y = MMDH_BIO_ASMT_PROFILE_SCORE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Cycle")
+
+plot
+
+```
+
+
+
+

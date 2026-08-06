@@ -1,0 +1,1065 @@
+---
+title: "Probabilistic_Analysis_Reynolds_2024"
+author: "Keleigh Reynolds"
+format: html
+editor: visual
+engine: knitr
+execute:
+  warning: false
+  message: false
+---
+
+## Introduction
+
+Probabilistic Code using the parquet files for the base of the analysis.
+
+## Read in the files
+
+Using the updated BWAM analytics file for prep. Read in the parquet file first and load libraries
+
+```{r message=FALSE}
+library(arrow)
+library(readr)
+library(ggplot2)
+library(spsurvey)
+library(dplyr)
+
+# Directories
+obt_result_dir <- file.path(
+  "L:",
+  "DOW",
+  "BWAM Share",
+  "data",
+  "parquet",
+  "analytical_table_store",
+  "obt_result.parquet"
+)
+
+
+```
+
+Then we'll load in the weights from the workup that was previous to this. this is the last 3 cycles - so 2008, 2013 and 2018
+
+```{r read-in-files, message = FALSE}
+#read in the adjusted weights from the original workup-harvesting-COMID-wgt_11_9_22.R
+wgts<-readr::read_csv("outputs/prob_site_adj_wgt_kar.csv")
+
+#fixing ID's 
+
+
+#clean up, lots of extra columns
+wgts<-wgts %>% 
+  dplyr::select(-c(
+  PREVIOUS_SAMPLE_DATE_1,
+  PREVIOUS_SAMPLE_DATE_2, 
+  PREVIOUS_SAMPLE_DATE_3,
+  PREVIOUS_SAMPLE_DATE_4, 
+  PREVIOUS_SAMPLE_DATE_5, 
+  PREVIOUS_SAMPLE_DATE_6, 
+  PREVIOUS_SAMPLE_DATE_7
+  ))
+
+wgts<-wgts %>% 
+  mutate(SMAS_ID = case_when(
+    SMAS_ID %in% "05-CAMP- 1.5"~"05-CAMB-1.5",
+    SMAS_ID %in% '05-COHO-4.0'~'05-COHO-3.9',
+    SMAS_ID %in% '05-MEAD-10.8'~'05-MEAD-10.9',
+    SMAS_ID %in% '08-BLCK_T58-2.0'~'08-BLCK_T79-2.0',
+    SMAS_ID %in% '08-LIME-6.3'~"08-LMKN-6.7",
+    SMAS_ID %in% '13-TIOR-0.2'~'13-TIOR-0.1',
+    SMAS_ID %in% '07-LIME-13'~'07-LIME-13.0',
+    SMAS_ID %in% '04-MCMI_S-5'~'04-MCMI_S-5.0',
+    SMAS_ID %in% '4-CRYD-2.3'~'04-CRYD-2.3',
+    SMAS_ID %in% '4-WIGW-0.7'~'04-WIGW-0.7',
+    SMAS_ID %in% '9-LITL-3.5'~'09-LITL-3.5',
+    SMAS_ID %in% '9-REGI-7.8'~'09-REGI-7.8',
+    SMAS_ID %in% '9-SCKE-8.3'~'09-SCKE-8.3',
+    SMAS_ID %in% '9-WSCK-3.4'~'09-WSCK-3.4',
+    SMAS_ID %in% "05-CRAN-0.1"~ "05-CRBP-0.1",
+    SMAS_ID %in% "08-BENE-0.6"~ "08-BENE-0.8",
+    SMAS_ID %in% "06-BIBS-6.6"~ "06-JENC-6.6",
+    SMAS_ID %in% "11-UHUD-98.3"~ "11-UHUD-98.7",
+    TRUE ~ SMAS_ID
+  ))
+
+sites.l<-unique(wgts$SMAS_ID) #creating a list of the unique stream sites
+#rename to site_code
+wgts$SITE_CODE <- wgts$SMAS_ID
+```
+
+Then we can merge with parquet files, by doing some filtering and merging
+
+```{r collect-parquet-file}
+# All stream data from the sites Id'd as probabilistic
+stream_df <- open_dataset(obt_result_dir) |> 
+  filter(WATERBODY_TYPE %in% "river_stream",
+         SITE_CODE %in% sites.l) |> 
+  collect() 
+
+missing<-anti_join(
+  wgts,
+  stream_df,
+  by = "SITE_CODE"
+)
+
+#there are 11 sites that did not match, these might be site name changes from teh parquet file? Need to check these
+
+```
+
+```{r merge-with-weights}
+#create a merge field with year and site for the wgts
+stream_df_merge<-stream_df %>% 
+  mutate(year = lubridate::year(EVENT_DATETIME),
+         matching = paste(SITE_CODE,year,sep = "_"))
+
+wgts<-wgts %>% 
+  mutate(matching = paste(SITE_CODE,YEAR,sep = "_"))
+
+#inner join since we dont want the unmatched
+
+stream_df_merged<-merge(stream_df_merge,wgts,
+                           c("matching","SITE_CODE"))
+
+#write to RDS to use in other scripts
+write_rds(stream_df_merged,"outputs/Probabilistic_data_workup_2_6_25.rds")
+
+
+#look at the ones that didnt match
+non_matches<-anti_join(
+  wgts,
+  stream_df_merge,
+  by = c("matching","SITE_CODE")
+)
+#write.csv(non_matches, "outputs/prob_matching_fix.csv")
+
+#fix the ones that didnt match, read in the file that I tracked 
+#some were problems with id, others didnt match w/the year sampled. these fixes are incorporated up above in the code - read-in-files
+
+```
+
+Now, we can do some fun things! the column "start" is the draw year, so I updated that here for clarity.
+
+Statewide BAP stuff
+
+```{r fun-coding-BAP, message=FALSE, warning=FALSE}
+
+stream_df_merged$draw_year<-stream_df_merged$start
+
+stream_df_merged<-stream_df_merged %>% 
+  dplyr::rename(latitude = LATITUDE,
+         longitude = LONGITUDE) |> 
+  mutate(adj_wgt_all = adj_wgt/3)
+
+#filter the data
+metrics.sf<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% "bap_biological_assessment_profile") %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 7.5 ~ "Non-Impacted",
+                                  RESULT_VALUE >=5 & RESULT_VALUE < 7.5~"Slightly Impacted",
+                                  RESULT_VALUE < 5& RESULT_VALUE >=2.5~"Moderately Impacted",
+                                  RESULT_VALUE <2.5~"Severly Impacted",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt >0)
+
+#create sf object
+metrics.sf <- sf::st_as_sf(metrics.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = metrics.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  subpops = "draw_year"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "BAP Categories")+
+  labs(fill = "Draw Year")
+
+plot+facet_wrap(~Category) + ylab("% of Total stream Miles")+xlab("Probabilistic Cycle Year")
+
+
+plot2<-ggplot2::ggplot(metrics.sf,
+                      aes(x=as.factor(draw_year), y = RESULT_VALUE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Draw Year")
+
+plot2
+
+standard_ests_bap<-spsurvey::cont_analysis(
+  dframe = metrics.sf,
+  vars = "RESULT_VALUE",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt_all"
+  # subpops = "SO"
+)
+
+plot(standard_ests_bap$CDF)
+```
+
+```{r some more fun BAP things}
+
+#filter the data
+metrics.sf_pma<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% "percent_model_affinity" ) %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 64 ~ "Non-Impacted",
+                                  RESULT_VALUE >=49 & RESULT_VALUE < 64~"Slightly Impacted",
+                                  RESULT_VALUE >=35& RESULT_VALUE <=49~"Moderately Impacted",
+                                  RESULT_VALUE <35~"Severly Impacted",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt >0) |> 
+  mutate(adj_wgt_all = adj_wgt/3) |> 
+  mutate(SO = case_when(SO >=4 ~ 4,
+                        TRUE ~ SO))
+
+#thinking about nitrogen stuff
+  # mutate(standard_cat = case_when(RESULT_VALUE >= 482 ~ "Poor",
+  #                                 RESULT_VALUE >345 & RESULT_VALUE <= 482~"Fair",
+  #                                 RESULT_VALUE < 345& RESULT_VALUE >= 0 ~"Good",
+  #                                 TRUE ~ "error"))
+
+
+#create sf object
+metrics.sf_pma <- sf::st_as_sf(metrics.sf_pma,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = metrics.sf_pma,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt_all",
+  subpops = "SO"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total") |> 
+  filter(Subpopulation != 0)
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "PMA Categories")+
+  labs(fill = "SO")
+
+plot+facet_wrap(~Category) + ylab("% of Total stream Miles")+xlab("Strahler Order")
+
+standard_ests<-spsurvey::cont_analysis(
+  dframe = metrics.sf_pma,
+  vars = "RESULT_VALUE",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt_all"
+  # subpops = "SO"
+)
+
+plot(standard_ests$CDF)
+```
+
+```{r chemistry-from-NRSA-levels-salinity}
+
+#filter the data
+sal.sf<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% "salinity") %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= .500 ~ "Fair",
+                                  RESULT_VALUE >.500 & RESULT_VALUE <= 1.000~"Poor",
+                                  RESULT_VALUE < .500& RESULT_VALUE >= 0 ~"Good",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt >0)
+
+#create sf object
+sal.sf <- sf::st_as_sf(sal.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = sal.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  subpops = "draw_year"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "Salinity Categories")
+
+plot+facet_wrap(~Category) + ylab("% of Total stream Miles")+xlab("Probabilistic Cycle Year")
+
+
+plot2<-ggplot2::ggplot(metrics.sf,
+                      aes(x=as.factor(draw_year), y = RESULT_VALUE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Draw Year")
+
+plot2
+
+```
+
+```{r chemistry-from-NRSA-levels-conductivity}
+
+#filter the data
+cond.sf<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% "specific_conductance") %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 500 ~ "Fair",
+                                  RESULT_VALUE >500 & RESULT_VALUE <= 1000~"Poor",
+                                  RESULT_VALUE < 500& RESULT_VALUE >= 0 ~"Good",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt >0)
+
+#create sf object
+cond.sf <- sf::st_as_sf(cond.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = cond.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  subpops = "draw_year"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "Sp. Conductivity Categories")
+
+plot+facet_wrap(~Category) + ylab("% of Total stream Miles")+xlab("Probabilistic Cycle Year")
+
+
+plot2<-ggplot2::ggplot(metrics.sf,
+                      aes(x=as.factor(draw_year), y = RESULT_VALUE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Draw Year")
+
+plot2
+
+```
+
+TN
+
+```{r chemistry-from-NRSA-levels-nitrogen}
+#filter the data
+nitrogen.sf<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% "nitrogen") %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 482 ~ "Poor",
+                                  RESULT_VALUE >345 & RESULT_VALUE <= 482~"Fair",
+                                  RESULT_VALUE < 345& RESULT_VALUE >= 0 ~"Good",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt >0)
+
+#create sf object
+nitrogen.sf <- sf::st_as_sf(metrics.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = metrics.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  subpops = "draw_year"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "Nitrogen (T) Categories")
+
+plot
+plot+facet_wrap(~Category) + ylab("% of Total stream Miles")+xlab("Probabilistic Cycle Year")
+
+
+plot2<-ggplot2::ggplot(metrics.sf,
+                      aes(x=as.factor(draw_year), y = RESULT_VALUE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Draw Year")
+
+plot2
+
+```
+
+Phosphorus
+
+```{r chemistry-from-NRSA-levels-phosphorus}
+
+#filter the data
+phos.sf<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% "phosphorus") %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 0.032 ~ "Poor",
+                                  RESULT_VALUE >0.017 & RESULT_VALUE <= 0.032~"Fair",
+                                  RESULT_VALUE < 0.017& RESULT_VALUE >= 0 ~"Good",
+                                  TRUE ~ "error")) %>% 
+  filter(adj_wgt >0)
+
+#create sf object
+phos.sf <- sf::st_as_sf(phos.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = metrics.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  subpops = "draw_year"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "Phosphorus(T) Categories")
+
+plot+facet_wrap(~Category) + ylab("% of Total stream Miles")+xlab("Probabilistic Cycle Year")
+
+
+plot2<-ggplot2::ggplot(metrics.sf,
+                      aes(x=as.factor(draw_year), y = RESULT_VALUE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Draw Year")
+
+plot2
+
+```
+
+HMA stuff
+
+```{r}
+#filter the data
+hma.sf<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% c("habitat_assessment_score")) %>%
+  group_by(SITE_CODE, EVENT_DATETIME) %>% 
+  mutate(standard_cat = case_when(RESULT_VALUE >= 80 ~ "Natural",
+                                    RESULT_VALUE >= 70 & RESULT_VALUE <= 80  ~ "Altered",
+                                    RESULT_VALUE >= 60 & RESULT_VALUE <= 69~ "Moderate",
+                                    RESULT_VALUE < 60 ~ "Severe",
+                                    TRUE ~ "ERROR")) %>% 
+  filter(adj_wgt > 0)
+
+
+#create sf object
+hma.sf <- sf::st_as_sf(hma.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = hma.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  subpops = "draw_year"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "HMA Categories")
+
+plot+facet_wrap(~Category)
+
+
+plot2<-ggplot2::ggplot(metrics.sf,
+                      aes(x=as.factor(draw_year), y = RESULT_VALUE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Class")
+
+plot2
+
+```
+
+#looking at the userp stuff
+
+```{r}
+#filter the data
+user.sf<-stream_df_merged %>% 
+  filter(PARAMETER_NAME %in% c("primary_variable")) |> 
+  filter(adj_wgt > 0) |> 
+  mutate(standard_cat1 = sub(",.*", "", RESULT_CATEGORY)) |> 
+  mutate(standard_cat = case_when(
+    standard_cat1 %in% "Water Clarity" | standard_cat1 %in% "Water_Clarity"~ "clarity",
+    standard_cat1 %in% "Periphyton" ~ "periphyton",
+    standard_cat1 %in% "Odor" ~ "odor",
+    standard_cat1 %in% "Trash" ~ "trash",
+    standard_cat1 %in% "Macrophyte" ~ "macrophyte",
+    standard_cat1 %in% "Proximity to Development Roads" |
+      standard_cat1 %in% "Proximity to Development Buildings" ~ "proximity to development",
+    TRUE ~ "other"
+    
+  ))
+
+
+#create sf object
+user.sf <- sf::st_as_sf(user.sf,
+  coords = c("longitude", "latitude"),
+  crs = "+proj=longlat +datum=WGS84 +no_defs"
+)
+
+#run the spsurvey data
+standard_ests<-spsurvey::cat_analysis(
+  dframe = user.sf,
+  vars = "standard_cat",
+  siteID = "SITE_CODE",
+  weight = "adj_wgt",
+  subpops = "draw_year"
+)
+
+standard_ests<-standard_ests %>% 
+  filter(Category != "Total")
+
+
+plot<-ggplot2::ggplot(standard_ests, aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P)) +
+  geom_bar(stat="identity",aes(fill=standard_ests$Subpopulation)) +
+  geom_crossbar( aes(x=factor(standard_ests$Subpopulation), y=standard_ests$Estimate.P, ymin=standard_ests$LCB95Pct.P, ymax=standard_ests$UCB95Pct.P), colour="grey", alpha=0.5, size=0.5, fill = "grey")+
+  # ggpattern::geom_crossbar_pattern( aes(x=factor(chloride_ests$Category), y=chloride_ests$Estimate.P, ymin=chloride_ests$LCB95Pct.P, ymax=chloride_ests$UCB95Pct.P), size = 0.5)+
+  geom_errorbar(aes(ymin= standard_ests$LCB95Pct.P,
+                    ymax= standard_ests$UCB95Pct.P),
+                width=.2,                    # Width of the error bars
+                position="identity",
+                alpha = 0.5)+
+  coord_flip()+ggtitle(label = "Userp Categories")
+
+plot+facet_wrap(~Category)
+
+
+plot2<-ggplot2::ggplot(metrics.sf,
+                      aes(x=as.factor(draw_year), y = RESULT_VALUE)) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + 
+    xlab("Class")
+
+plot2
+
+```
+
+Looking at CDF plots; are these part of the spsurvey package?? Will look \@ Alene's script. These are part of the Lake reports - sideways raincloud plots; for distrubution
+
+ash1_wgt - this is an internal function in spsurvey to show the average shifted histogram.
+
+Need to split these into ordinal vs. continous - then run them.
+
+```{r results='asis', continuous}
+#first pivot the data wider - looks like it needs 
+options(scipen = 99999)
+stream_wide<-stream_df_merged %>% 
+  filter(draw_year %in% 2018) %>% 
+  select(SITE_CODE,
+         EVENT_DATETIME,
+         latitude,
+         longitude,
+         BASIN_NAME,
+         RESULT_VALUE,
+         UNIT,
+         PARAMETER_NAME,
+         adj_wgt,draw_year
+         ) %>% 
+  mutate(parameter = paste(PARAMETER_NAME,UNIT,sep = "_")) %>% 
+  select(-c(PARAMETER_NAME,UNIT)) %>% 
+  group_by(SITE_CODE,EVENT_DATETIME) %>% 
+  filter(parameter %in% c(
+    "temperature_deg C" ,
+    "specific_conductance_uS/cm",
+    "ph_pH units",
+    "dissolved_oxygen_mg/L",
+    "salinity_ppt" ,
+    "hardness_ug/L" ,
+    "turbidity_NTU",
+    "kjeldahl_nitrogen_ug/L",
+    "phosphorus_mg/L",
+    "chlorophyll-a-concentration_total_ug/L" ,
+    "nitrogen_ug/L",
+    "alkalinity_ug/L",
+    "nitrate_ug/L",
+    "chloride_ug/L" ,
+    "nitrate_nitrite_ug/L" ,
+    "iron_ug/L" ,
+    "ammonia_ug/L",
+    "orthophosphate_ug/L" ,
+    "total_dissolved_solids_ug/L" ,
+    "dissolved_organic_carbon_ug/L"
+  )) %>% 
+  tidyr::pivot_wider(names_from = parameter,values_from = RESULT_VALUE, 
+                     values_fn = {median})
+
+probDF<-spsurvey::ash1_wgt(stream_wide$`ph_pH units`,
+                           wgt=stream_wide$adj_wgt)
+probDF<-data.frame(x=probDF$x,y=probDF$y)
+probDF<-probDF %>% 
+  rename(results=x,
+         probability=y) %>% 
+  mutate(parameter="ph_pH units")
+#now for all the rest
+
+
+
+forpdf<-stream_df_merged %>% 
+  select(SITE_CODE,
+         EVENT_DATETIME,
+         latitude,
+         longitude,
+         BASIN_NAME,
+         RESULT_VALUE,
+         UNIT,
+         PARAMETER_NAME,
+         adj_wgt,draw_year
+         ) %>% 
+  mutate(parameter = paste(PARAMETER_NAME,UNIT,sep = "_")) %>% 
+  select(-c(PARAMETER_NAME,UNIT)) %>% 
+  group_by(SITE_CODE,EVENT_DATETIME) %>% 
+  filter(parameter %in% c(
+    "temperature_deg C" ,
+    "specific_conductance_uS/cm",
+    "ph_pH units",
+    "dissolved_oxygen_mg/L",
+    "salinity_ppt" ,
+    "hardness_ug/L" ,
+    "turbidity_NTU",
+    "kjeldahl_nitrogen_ug/L",
+    "phosphorus_mg/L",
+    "chlorophyll-a-concentration_total_ug/L" ,
+    "nitrogen_ug/L",
+    "alkalinity_ug/L",
+    "nitrate_ug/L",
+    "chloride_ug/L" ,
+    "nitrate_nitrite_ug/L" ,
+    "iron_ug/L" ,
+    "ammonia_ug/L",
+    "orthophosphate_ug/L" ,
+    "total_dissolved_solids_ug/L" ,
+    "dissolved_organic_carbon_ug/L"
+  ))
+params<-unique(forpdf$parameter)
+nparams<-length(params)
+for(i in 1:nparams){
+  test<-forpdf %>% filter(parameter==params[i])
+  test<-spsurvey::ash1_wgt(test$RESULT_VALUE,wgt=test$adj_wgt)
+  test<-data.frame(x=test$x,y=test$y)
+test<-test %>% 
+  rename(results=x,
+         probability=y) %>% 
+  mutate(parameter=params[i])
+  probDF<-merge(probDF,test,all=TRUE)
+}
+
+for (i in 1:nparams){
+  library(ggplot2)
+  library(dplyr)
+#ok we got em all now :)
+p_all<-stream_df_merged %>% 
+  mutate(parameter = paste(PARAMETER_NAME,UNIT,sep = "_")) %>% 
+  dplyr::filter(parameter %in% params[i]) %>% 
+  distinct()
+
+probDF_filter<-probDF %>% 
+  dplyr::filter(parameter %in% params[i]) %>% 
+  distinct()
+
+upper_y_limit<-max((max(p_all$RESULT_VALUE,na.rm = TRUE)+
+                      0.05*max(p_all$RESULT_VALUE, na.rm = TRUE)),.15)
+avg = mean(p_all$RESULT_VALUE,na.rm = TRUE)
+
+plot<-(ggplot(probDF_filter,aes(x=results,y=probability))+
+       geom_line()+
+       geom_area(colour="black", fill="#808080", alpha=.2)+
+       scale_x_continuous(limits = c(0,upper_y_limit))+                                 #creates y limit to match above
+       ylab(paste("statewide %",params[i],sep = " "))+
+       geom_vline(xintercept = avg)+                                                    #creates intercept of avg vs statewide %
+       theme(#axis.text.x=element_blank(), #remove x axis labels
+             #axis.ticks.x=element_blank(), #remove x axis ticks
+             # axis.title.x=element_blank(),
+             axis.title.x=element_text(size=8, vjust = 8),                              #sets size and location of axis title
+            # axis.title.y=element_blank(),
+            # axis.text.y=element_blank(),  #remove y axis labels
+            # axis.ticks.y=element_blank(),
+            # panel.border = element_blank(), 
+            # panel.grid.major = element_blank(),
+            # panel.grid.minor = element_blank(), 
+            # panel.background = element_blank(),
+            # axis.line = element_blank(),
+             plot.margin=unit(c(-.55,0,-.15,0),"cm"))+              #controls stretch of statewide % to be equal to the length of plots
+       coord_flip())+
+  ggtitle(params[i])
+
+knitr::knit_print(plot)
+}
+```
+
+Now the ordinal ones
+
+```{r ordinal-graphs}
+#first pivot the data wider - looks like it needs 
+options(scipen = 99999)
+stream_wide_ordinal<-stream_df_merged %>% 
+  filter(draw_year %in% 2018) %>% 
+  select(SITE_CODE,
+         EVENT_DATETIME,
+         latitude,
+         longitude,
+         BASIN_NAME,
+         RESULT_VALUE,
+         UNIT,
+         PARAMETER_NAME,
+         adj_wgt,draw_year
+         ) %>% 
+  mutate(parameter = paste(PARAMETER_NAME,UNIT,sep = "_")) %>% 
+  select(-c(PARAMETER_NAME,UNIT)) %>% 
+  group_by(SITE_CODE,EVENT_DATETIME) %>% 
+  filter(parameter %in% c(
+    "bioassessment_profile_score_0-10",
+    "percent_model_affinity_score_0-10",
+    "water_clarity_rating_scale_0-10" ,
+    "canopy_cover_percent",
+    "estimated_diatom_coverage_score"
+  )) %>% 
+  tidyr::pivot_wider(names_from = parameter,values_from = RESULT_VALUE, 
+                     values_fn = {median})
+
+probDF<-spsurvey::ash1_wgt(stream_wide_ordinal$`bioassessment_profile_score_0-10`,
+                           wgt=stream_wide$adj_wgt,
+                           support = "Ordinal")
+probDF<-data.frame(x=probDF$x,y=probDF$y)
+probDF<-probDF %>% 
+  rename(results=x,
+         probability=y) %>% 
+  mutate(parameter="bioassessment_profile_score_0-10")
+#now for all the rest
+
+
+forpdf<-stream_df_merged %>% 
+  select(SITE_CODE,
+         EVENT_DATETIME,
+         latitude,
+         longitude,
+         BASIN_NAME,
+         RESULT_VALUE,
+         UNIT,
+         PARAMETER_NAME,
+         adj_wgt,draw_year
+         ) %>% 
+  mutate(parameter = paste(PARAMETER_NAME,UNIT,sep = "_")) %>% 
+  select(-c(PARAMETER_NAME,UNIT)) %>% 
+  group_by(SITE_CODE,EVENT_DATETIME) %>% 
+  filter(parameter %in% c(
+   "bioassessment_profile_score_0-10",
+    "percent_model_affinity_score_0-10",
+    "water_clarity_rating_scale_0-10" ,
+    "canopy_cover_percent",
+    "estimated_diatom_coverage_score"
+  ))
+params<-unique(forpdf$parameter)
+nparams<-length(params)
+for(i in 1:nparams){
+  test<-forpdf %>% filter(parameter==params[i])
+  test<-spsurvey::ash1_wgt(test$RESULT_VALUE,wgt=test$adj_wgt)
+  test<-data.frame(x=test$x,y=test$y)
+test<-test %>% 
+  rename(results=x,
+         probability=y) %>% 
+  mutate(parameter=params[i])
+  probDF<-merge(probDF,test,all=TRUE)
+}
+
+for (i in 1:nparams){
+  library(ggplot2)
+  library(dplyr)
+#ok we got em all now :)
+p_all<-stream_df_merged %>% 
+  mutate(parameter = paste(PARAMETER_NAME,UNIT,sep = "_")) %>% 
+  dplyr::filter(parameter %in% params[i]) %>% 
+  distinct()
+
+probDF_filter<-probDF %>% 
+  dplyr::filter(parameter %in% params[i]) %>% 
+  distinct()
+
+upper_y_limit<-max((max(p_all$RESULT_VALUE,na.rm = TRUE)+
+                      0.05*max(p_all$RESULT_VALUE, na.rm = TRUE)),.15)
+avg = mean(p_all$RESULT_VALUE,na.rm = TRUE)
+
+plot<-(ggplot(probDF_filter,aes(x=results,y=probability))+
+       geom_line()+
+       geom_area(colour="black", fill="#808080", alpha=.2)+
+       scale_x_continuous(limits = c(0,upper_y_limit))+                                 #creates y limit to match above
+       ylab(paste("statewide %",params[i],sep = " "))+
+       geom_vline(xintercept = avg)+                                                    #creates intercept of avg vs statewide %
+       theme(#axis.text.x=element_blank(), #remove x axis labels
+             #axis.ticks.x=element_blank(), #remove x axis ticks
+             # axis.title.x=element_blank(),
+             axis.title.x=element_text(size=8, vjust = 8),                              #sets size and location of axis title
+            # axis.title.y=element_blank(),
+            # axis.text.y=element_blank(),  #remove y axis labels
+            # axis.ticks.y=element_blank(),
+            # panel.border = element_blank(), 
+            # panel.grid.major = element_blank(),
+            # panel.grid.minor = element_blank(), 
+            # panel.background = element_blank(),
+            # axis.line = element_blank(),
+             plot.margin=unit(c(-.55,0,-.15,0),"cm"))+              #controls stretch of statewide % to be equal to the length of plots
+       coord_flip())+
+  ggtitle(params[i])
+
+knitr::knit_print(plot)
+}
+
+```
+
+Grab the NRSA files to do the comparison to other states?
+
+```{r}
+#stream_epa<-spsurvey::NRSA)EPA7
+#not sure this is what we need. you can download the data, but this is just iowa, kansas, misoouri and nebraska
+  
+  
+```
+
+Look at the slope and change - diffP - change in %
+
+**DiffEst.P**
+
+:   proportion above or below median difference estimate (in %; second survey - first survey)
+
+```{r}
+metrics.sf_13_18<-metrics.sf %>% 
+  filter(draw_year %in% c("2018","2013"))
+
+change_bap<-spsurvey::change_analysis(metrics.sf_13_18,
+                         vars_cat = "standard_cat",
+                         surveyID = "draw_year",
+                         siteID = "SMAS_ID",
+                         weight = "adj_wgt",
+                         subpops = "BASIN_NAME")
+
+metrics.sf_08_13<-metrics.sf %>% 
+  filter(draw_year %in% c("2008","2013"))
+
+change_bap_08_13<-spsurvey::change_analysis(metrics.sf_08_13,
+                         vars_cat = "standard_cat",
+                         surveyID = "draw_year",
+                         siteID = "SMAS_ID",
+                         weight = "adj_wgt",
+                         subpops = "BASIN_NAME")
+
+#merge them together?
+
+
+
+```
+
+MAPS
+
+```{r}
+basin <- sf::read_sf("L:/DOW/BWAM Share/SMAS/data/archive/map_files/basin_big.shp") 
+metrics.sf$Year<-as.character(metrics.sf$draw_year)
+
+sf::st_crs(basin)
+
+basin_shp<-st_crs("+proj=longlat +datum=WGS84 +no_defs")
+
+basin_shp<-sf::st_as_sf(basin)
+states <- sf::st_as_sf(maps::map("state",
+                           plot = FALSE,
+                           fill = TRUE))
+
+nys <- states %>%
+  filter(ID == "new york")
+
+# get bounding for the outline this is for the inset map, to make it have a border
+outline.df <- ggplot2::fortify(nys)
+nybox <- sf::st_as_sfc(sf::st_bbox(outline.df))
+
+# make some bbox magic to give it a little border
+bbox_new <- st_bbox(nybox) # current bounding box
+
+xrange <- bbox_new$xmax - bbox_new$xmin # range of x values
+yrange <- bbox_new$ymax - bbox_new$ymin # range of y values
+
+# bbox_new[1] <- bbox_new[1] - (0.25 * xrange) # xmin - left
+bbox_new[3] <- bbox_new[3] + (0.4 * xrange) # xmax - right
+# bbox_new[2] <- bbox_new[2] - (0.25 * yrange) # ymin - bottom
+bbox_new[4] <- bbox_new[4] + (0.2 * yrange) # ymax - top
+
+bbox_new <- bbox_new %>% # take the bounding box ...
+  st_as_sfc() # ... and make it a sf polygon
+# checking SSL
+
+
+basin_map <- tmap::tm_basemap(c(
+  StreetMap = "OpenStreetMap",
+  TopoMap = "OpenTopoMap"
+)) +
+  # tmap_options(check.and.fix = TRUE) +
+  # tmap::tm_shape(nys, bbox = bbox_new) +
+  # tmap::tm_fill() +
+  tmap::tm_shape(basin_shp,
+    bbox = bbox_new
+  ) +
+  tmap::tm_fill(col = "white", alpha = .9) +
+  tmap::tm_borders() +
+  tmap::tm_shape(metrics.sf)+
+  tmap::tm_dots(
+          shape = "Year",
+          title = "BAP Categories",
+          size = 0.2,
+          pallete = "brewer.greens")+
+          #colorNA = "green",   # <-------- color for NA values)+
+  tmap::tm_scale_bar(position = c("left", "bottom")) +
+  tmap::tm_compass(position = c("left", "top")) +
+  tmap::tm_layout(
+    title = "Statewide Macroinvertebrates",
+    legend.position = c("right", "top"),
+    bg.color = "grey85"
+  ) +
+  tmap::tm_credits("Data source:2008-2021 ",
+    fontface = "italic",
+    align = "right"
+  ) +
+  tmap::tm_credits("Author: SMAS ",
+    fontface = "bold",
+    align = "right"
+  )
+basin_map
+
+``
+
+
+```
+
+```{r}
+
+basin_map2 <- 
+  # tmap_options(check.and.fix = TRUE) +
+  # tmap::tm_shape(nys, bbox = bbox_new) +
+  # tmap::tm_fill() +
+  tmap::tm_shape(basin_shp,
+    bbox = bbox_new
+  ) +
+#   tmap::tm_basemap(c(
+#   StreetMap = "OpenStreetMap",
+#   TopoMap = "OpenTopoMap"
+# )) +
+  tmap::tm_fill(col = "white", fill_alpha = .9) +
+  tmap::tm_borders() +
+  tmap::tm_shape(metrics.sf)+
+  tmap::tm_dots(shape = "Year",
+          title = "Draw Year",
+          col = "Year",
+         # size = 0.2,
+          palette = "Greens")+
+          #colorNA = "green",   # <-------- color for NA values)+
+  tmap::tm_scale_bar(position = c("left", "bottom")) +
+  tmap::tm_compass(position = c("left", "bottom")) +
+  tmap::tm_layout(
+    title = "Statewide Probability Surveys",
+    legend.position = c("right", "top"),
+    bg.color = "grey85"
+  ) +
+  tmap::tm_credits("Data source:2008-2022 ",
+    fontface = "italic",
+    align = "right"
+  ) +
+  tmap::tm_credits("Author: SMAS ",
+    fontface = "bold",
+    align = "right"
+  )
+basin_map2
+
+```
+
+OTHER analyses
+
+ideas - weighted regression models for relationships
+
+Q - does the impact of ag on nutrients differ between small and large streams?
+
+spatial pattern regressions ?
+
+IF we want to use all years together - if they're weighted the same for stratificiation choice, divide adjusted weights by the \# of surveys - same time periods equally
+
+OR post stratification postStratify in teh survey package
+
+```{r}
+
+```
